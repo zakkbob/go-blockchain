@@ -1,2 +1,2 @@
 # go-blockchain
-My own blockchain, created for learning purposed
+My own blockchain written in go, created for learning purposes
