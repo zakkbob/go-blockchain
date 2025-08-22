@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/binary"
+	"slices"
 )
 
 type Transaction struct {
@@ -22,12 +23,21 @@ func MakeTransaction(sender ed25519.PublicKey, receiver ed25519.PublicKey, value
 	}
 }
 
+func (tx *Transaction) Clone() Transaction {
+	return Transaction{
+		sender:    slices.Clone(tx.sender),
+		receiver:  slices.Clone(tx.receiver),
+		value:     tx.value,
+		signature: slices.Clone(tx.signature),
+	}
+}
+
 func (tx *Transaction) Verify() bool {
 	hash := tx.Hash()
 	return ed25519.Verify(tx.sender, hash[:], tx.signature)
 }
 
-func HashTransaction(sender ed25519.PublicKey, receiver ed25519.PublicKey, value uint64) [32]byte{
+func HashTransaction(sender ed25519.PublicKey, receiver ed25519.PublicKey, value uint64) [32]byte {
 	data := []byte(sender)[:]
 	data = append(data, []byte(receiver)[:]...)
 	data = binary.LittleEndian.AppendUint64(data, uint64(value))
