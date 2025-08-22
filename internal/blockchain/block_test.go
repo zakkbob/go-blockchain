@@ -14,6 +14,7 @@ func TestBlockMine(t *testing.T) {
 		[]blockchain.Transaction{},
 		difficulty,
 	)
+
 	block1.Mine()
 
 	block2 := blockchain.NewBlock(
@@ -23,6 +24,10 @@ func TestBlockMine(t *testing.T) {
 	)
 	block2.Mine()
 
-	t.Error(block1.String())
-	t.Error(block2.String())
+	t.Log(block1.String())
+	t.Log(block2.String())
+
+	if !(block1.ValidHash() && block2.ValidHash()) {
+		t.Error("Mined block should be valid")
+	}
 }

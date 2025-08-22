@@ -39,7 +39,7 @@ func (b *Block) String() string {
 		len(b.transactions),
 		b.nonce.String(),
 		b.timestamp,
-		b.Valid(),
+		b.ValidHash(),
 	)
 }
 
@@ -63,7 +63,17 @@ func (b *Block) Nonce() *uint256.Int {
 	return b.nonce
 }
 
-func (b *Block) Valid() bool {
+func (b *Block) VerifyTransactions() bool {
+	for _, tx := range b.transactions {
+		if !tx.Verify() {
+			return false
+		}
+	}
+	return true
+
+}
+
+func (b *Block) ValidHash() bool {
 	hash := b.Hash()
 	zeros := bits.LeadingZerosBytes(hash[:])
 
@@ -72,7 +82,7 @@ func (b *Block) Valid() bool {
 
 func (b *Block) Mine() {
 	one := uint256.NewInt(1)
-	for !b.Valid() {
+	for !b.ValidHash() {
 		b.nonce.Add(b.nonce, one)
 	}
 }
