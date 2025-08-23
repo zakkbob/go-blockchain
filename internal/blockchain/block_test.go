@@ -58,7 +58,7 @@ func TestTransactionBlockMine(t *testing.T) {
 
 	tx := sender.NewTransaction(receiver.PublicKey(), 1)
 
-	difficulty := 10
+	difficulty := 20
 
 	block1 := blockchain.NewBlock(
 		[32]byte{},
