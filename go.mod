@@ -1,5 +1,5 @@
 module github.com/zakkbob/go-blockchain
 
-go 1.24.5
+go 1.25.1
 
-require github.com/holiman/uint256 v1.3.2 // indirect
+require github.com/holiman/uint256 v1.3.2
