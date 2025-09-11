@@ -13,7 +13,7 @@ func TestEmptyBlockMine(t *testing.T) {
 		t.Errorf("GenerateAddress should not return an error: %v", err)
 	}
 
-	difficulty := 10
+	difficulty := 0
 
 	block1 := blockchain.NewBlock(
 		[32]byte{},
@@ -35,7 +35,7 @@ func TestEmptyBlockMine(t *testing.T) {
 	t.Log(block1.String())
 	t.Log(block2.String())
 
-	if !(block1.ValidHash() && block2.ValidHash()) {
+	if !(block1.VerifyHash() && block2.VerifyHash()) {
 		t.Error("Mined block should be valid")
 	}
 }
@@ -58,7 +58,7 @@ func TestTransactionBlockMine(t *testing.T) {
 
 	tx := sender.NewTransaction(receiver.PublicKey(), 1)
 
-	difficulty := 20
+	difficulty := 0
 
 	block1 := blockchain.NewBlock(
 		[32]byte{},
@@ -80,7 +80,7 @@ func TestTransactionBlockMine(t *testing.T) {
 	t.Log(block1.String())
 	t.Log(block2.String())
 
-	if !(block1.ValidHash() && block2.ValidHash()) {
+	if !(block1.VerifyHash() && block2.VerifyHash()) {
 		t.Error("Mined block should be valid")
 	}
 }

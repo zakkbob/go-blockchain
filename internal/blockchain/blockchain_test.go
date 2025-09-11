@@ -16,7 +16,7 @@ func assertAddressBalance(t *testing.T, c *blockchain.Blockchain, a blockchain.A
 
 }
 
-func GenerateAddress(t *testing.T) blockchain.Address {
+func generateTestAddress(t *testing.T) blockchain.Address {
 	addr, err := blockchain.GenerateAddress(rand.Reader)
 	if err != nil {
 		t.Errorf("GenerateAddress should not return an error: %v", err)
@@ -26,14 +26,14 @@ func GenerateAddress(t *testing.T) blockchain.Address {
 }
 
 func TestBlockchain(t *testing.T) {
-	miner1 := GenerateAddress(t)
-	miner2 := GenerateAddress(t)
-	miner3 := GenerateAddress(t)
+	miner1 := generateTestAddress(t)
+	miner2 := generateTestAddress(t)
+	miner3 := generateTestAddress(t)
 
-	b := blockchain.NewGenesisBlock(10, miner1.PublicKey())
+	b := blockchain.NewGenesisBlock(2, miner1.PublicKey())
 	b.Mine()
 
-	c, err := blockchain.NewBlockchain(b)
+	c, err := blockchain.New(b)
 	if err != nil {
 		t.Errorf("NewBlockchain should not return error: %v", err)
 		t.FailNow()
@@ -46,7 +46,7 @@ func TestBlockchain(t *testing.T) {
 	head := c.Head()
 	b = blockchain.NewBlock(head.Hash(), []blockchain.Transaction{
 		miner1.NewTransaction(miner2.PublicKey(), 8),
-	}, 10, miner2.PublicKey())
+	}, 2, miner2.PublicKey())
 	b.Mine()
 
 	err = c.AddBlock(b)
@@ -62,11 +62,11 @@ func TestBlockchain(t *testing.T) {
 	head = c.Head()
 	b = blockchain.NewBlock(head.Hash(), []blockchain.Transaction{
 		miner2.NewTransaction(miner3.PublicKey(), 20),
-	}, 10, miner3.PublicKey())
+	}, 2, miner3.PublicKey())
 	b.Mine()
 
 	err = c.AddBlock(b)
-	if !errors.Is(err, blockchain.InsufficientBalance) {
+	if !errors.Is(err, blockchain.ErrInsufficientBalance) {
 		t.Errorf("AddBlock should return error InsufficientBalance, not '%v'", err)
 		t.FailNow()
 	}

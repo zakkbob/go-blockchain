@@ -11,20 +11,20 @@ import (
 
 const MINER_REWARD = 10 // absolutely arbitrary
 
-var InvalidBlock = errors.New("block is not valid")
-var InsufficientBalance = errors.New("insufficient balance for transaction")
+var ErrInvalidBlock = errors.New("block is not valid")
+var ErrInsufficientBalance = errors.New("insufficient balance for transaction")
 
 type Blockchain struct {
 	head     *Block
 	blocks   map[[32]byte]*Block
 	balances map[[32]byte]uint64 // Public keys are represented as their sha256 hash since slices can't be map indexes
 
-	lock sync.RWMutex
+	mu sync.RWMutex
 
 	// heads []*Block // could possibly be used to handle conflicting chains, but then the balance logic would need to be head-dependant; too complex for now
 }
 
-func NewBlockchain(genesis Block) (*Blockchain, error) {
+func New(genesis Block) (*Blockchain, error) {
 	c := Blockchain{
 		blocks:   make(map[[32]byte]*Block),
 		balances: make(map[[32]byte]uint64),
@@ -38,81 +38,81 @@ func NewBlockchain(genesis Block) (*Blockchain, error) {
 	return &c, nil
 }
 
-func (c *Blockchain) Head() Block {
-	return c.head.Clone()
+func (bc *Blockchain) Head() Block {
+	return bc.head.Clone()
 }
 
-func (c *Blockchain) AddBlock(b Block) error {
-	clone := b.Clone()
+func (bc *Blockchain) AddBlock(b Block) error {
+	b = b.Clone()
 
-	if !clone.ValidBlock() {
-		return InvalidBlock
+	if !b.Verify() || (bc.head != nil && b.PrevBlock != bc.head.Hash()) {
+		return ErrInvalidBlock
 	}
 
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 
-	err := c.updateBalances(clone)
+	err := bc.updateBalances(b)
 	if err != nil {
 		return err
 	}
 
-	hash := clone.Hash()
-	c.head = &clone
-	c.blocks[hash] = c.head
+	hash := b.Hash()
+	bc.head = &b
+	bc.blocks[hash] = bc.head
 
 	return nil
 }
 
-func (c *Blockchain) cloneBalances() map[[32]byte]uint64 {
+func (bc *Blockchain) cloneBalances() map[[32]byte]uint64 {
 	clone := make(map[[32]byte]uint64)
-	maps.Copy(clone, c.balances)
+	maps.Copy(clone, bc.balances)
 	return clone
 }
 
-func (c *Blockchain) updateBalances(b Block) error {
-	balances := c.cloneBalances()
+func (bc *Blockchain) updateBalances(b Block) error {
+	balances := bc.cloneBalances()
 
-	for _, tx := range b.transactions {
-		if balance(balances, tx.sender) < tx.value {
-			return InsufficientBalance
+	for _, tx := range b.Transactions {
+		if balance(balances, tx.Sender) < tx.Value {
+			return ErrInsufficientBalance
 		}
 
-		decreaseBalance(balances, tx.sender, tx.value)
-		increaseBalance(balances, tx.receiver, tx.value)
+		decreaseBalance(balances, tx.Sender, tx.Value)
+		increaseBalance(balances, tx.Receiver, tx.Value)
 	}
 
-	increaseBalance(balances, b.miner, MINER_REWARD)
+	increaseBalance(balances, b.Miner, MINER_REWARD)
 
-	c.balances = balances
+	bc.balances = balances
 
 	return nil
 }
 
-func (c *Blockchain) Block(hash [32]byte) *Block {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+func (bc *Blockchain) Block(hash [32]byte) *Block {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 
-	return c.blocks[hash]
+	return bc.blocks[hash]
 }
 
-func (c *Blockchain) Balance(pubkey ed25519.PublicKey) uint64 {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+func (bc *Blockchain) Balance(pubkey ed25519.PublicKey) uint64 {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 
-	return balance(c.balances, pubkey)
+	return balance(bc.balances, pubkey)
 }
 
-func (c *Blockchain) updateBalance(pubkey ed25519.PublicKey, bal uint64) {
-	updateBalance(c.balances, pubkey, bal)
+func (bc *Blockchain) updateBalance(pubkey ed25519.PublicKey, bal uint64) {
+	updateBalance(bc.balances, pubkey, bal)
 }
 
-func (c *Blockchain) increaseBalance(pubkey ed25519.PublicKey, n uint64) {
-	increaseBalance(c.balances, pubkey, n)
+func (bc *Blockchain) increaseBalance(pubkey ed25519.PublicKey, n uint64) {
+	increaseBalance(bc.balances, pubkey, n)
 }
 
-func (c *Blockchain) decreaseBalance(pubkey ed25519.PublicKey, n uint64) {
-	decreaseBalance(c.balances, pubkey, n)
+func (bc *Blockchain) decreaseBalance(pubkey ed25519.PublicKey, n uint64) {
+	decreaseBalance(bc.balances, pubkey, n)
 }
 
 func balance(balances map[[32]byte]uint64, pubkey ed25519.PublicKey) uint64 {

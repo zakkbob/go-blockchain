@@ -13,79 +13,73 @@ import (
 	"github.com/holiman/uint256"
 )
 
-var PI, _ = uint256.FromDecimal("31415926535897932384626433832795028841971693993751058209749445923078164062862")
+var pi, _ = uint256.FromDecimal("31415926535897932384626433832795028841971693993751058209749445923078164062862")
 
 type Block struct {
-	difficulty   int
-	prevBlock    [32]byte
-	nonce        *uint256.Int
-	transactions []Transaction
-	timestamp    int64
-	miner        ed25519.PublicKey
-	genesis      bool
+	Difficulty   int
+	PrevBlock    [32]byte
+	Nonce        uint64
+	Transactions []Transaction
+	Timestamp    int64
+	Miner        ed25519.PublicKey
+	Genesis      bool
 
 	hashLower *uint256.Int // Valid hash lower bound
 	hashUpper *uint256.Int // Valid hash upper bound
 }
 
-func MakeBlock(difficulty int, prevBlock [32]byte, nonce *uint256.Int, transactions []Transaction, timestamp int64, miner ed25519.PublicKey) Block {
-	return Block{
-		difficulty:   difficulty,
-		prevBlock:    prevBlock,
-		nonce:        nonce,
-		transactions: transactions,
-		timestamp:    timestamp,
-		miner:        miner,
-		genesis:      false,
-	}
-}
-
 func NewGenesisBlock(difficulty int, miner ed25519.PublicKey) Block {
-	b := Block{
-		difficulty:   difficulty,
-		prevBlock:    [32]byte{},
-		transactions: []Transaction{},
-		nonce:        uint256.NewInt(0),
-		timestamp:    time.Now().Unix(),
-		miner:        miner,
-		genesis:      true,
+	return Block{
+		Difficulty:   difficulty,
+		PrevBlock:    [32]byte{},
+		Transactions: []Transaction{},
+		Nonce:        0,
+		Timestamp:    time.Now().Unix(),
+		Miner:        miner,
+		Genesis:      true,
 	}
-	b.calculateHashBounds()
-	return b
 }
 
 func NewBlock(prevBlock [32]byte, txs []Transaction, difficulty int, miner ed25519.PublicKey) Block {
-	b := Block{
-		difficulty:   difficulty,
-		prevBlock:    prevBlock,
-		transactions: txs,
-		nonce:        uint256.NewInt(0),
-		timestamp:    time.Now().Unix(),
-		miner:        miner,
-		genesis:      false,
+	return Block{
+		Difficulty:   difficulty,
+		PrevBlock:    prevBlock,
+		Transactions: txs,
+		Nonce:        0,
+		Timestamp:    time.Now().Unix(),
+		Miner:        miner,
+		Genesis:      false,
 	}
-	b.calculateHashBounds()
-	return b
 }
 
 // This might be avoided by creating a new struct MinedBlock which is immutable and returned by Mine()
 func (b *Block) Clone() Block {
-	newTxs := make([]Transaction, len(b.transactions))
+	newTxs := make([]Transaction, len(b.Transactions))
 
-	for i, tx := range b.transactions {
+	for i, tx := range b.Transactions {
 		newTxs[i] = tx.Clone()
 	}
 
+	var hashLower *uint256.Int = nil
+	var hashUpper *uint256.Int = nil
+
+	if b.hashLower != nil {
+		hashLower = b.hashLower.Clone()
+	}
+	if b.hashUpper != nil {
+		hashUpper = b.hashUpper.Clone()
+	}
+
 	return Block{
-		difficulty:   b.difficulty,
-		prevBlock:    b.prevBlock,
-		transactions: newTxs,
-		nonce:        b.nonce,
-		timestamp:    b.timestamp,
-		miner:        slices.Clone(b.miner),
-		genesis:      b.genesis,
-		hashLower:    b.hashLower.Clone(),
-		hashUpper:    b.hashUpper.Clone(),
+		Difficulty:   b.Difficulty,
+		PrevBlock:    b.PrevBlock,
+		Transactions: newTxs,
+		Nonce:        b.Nonce,
+		Timestamp:    b.Timestamp,
+		Miner:        slices.Clone(b.Miner),
+		Genesis:      b.Genesis,
+		hashLower:    hashLower,
+		hashUpper:    hashUpper,
 	}
 }
 
@@ -99,43 +93,34 @@ func (b *Block) uint256Hash() *uint256.Int {
 func (b *Block) String() string {
 	hash := b.uint256Hash()
 	return fmt.Sprintf(
-		"Hash: %s; Previous Block: %s; Difficulty: %d; Transactions: %d; Nonce: %s; Timestamp: %d; Mined By: %s; Genesis: %t; Hash Satisfies Difficulty: %t; Verified Transactions: %t",
+		"Hash: %s; Previous Block: %s; Difficulty: %d; Transactions: %d; Nonce: %d; Timestamp: %d; Mined By: %s; Genesis: %t; Hash Satisfies Difficulty: %t; Verified Transactions: %t",
 		hash.Dec(),
-		hex.EncodeToString(b.prevBlock[:]),
-		b.difficulty,
-		len(b.transactions),
-		b.nonce.String(),
-		b.timestamp,
-		hex.EncodeToString(b.miner),
-		b.genesis,
-		b.ValidHash(),
+		hex.EncodeToString(b.PrevBlock[:]),
+		b.Difficulty,
+		len(b.Transactions),
+		b.Nonce,
+		b.Timestamp,
+		hex.EncodeToString(b.Miner),
+		b.Genesis,
+		b.VerifyHash(),
 		b.VerifyTransactions(),
 	)
 }
 
-func (b *Block) Timestamp() int64 {
-	return b.timestamp
-}
-
 func (b *Block) Hash() [32]byte {
-	nonceBytes := b.nonce.Bytes32()
-	txsHash := HashTransactions(b.transactions)
+	txsHash := hashTransactions(b.Transactions)
 
-	data := b.prevBlock[:]
+	data := b.PrevBlock[:]
 	data = append(data, txsHash[:]...)
-	data = append(data, nonceBytes[:]...)
-	data = binary.LittleEndian.AppendUint64(data, uint64(b.timestamp))
-	data = append(data, []byte(b.miner)...)
+	data = binary.LittleEndian.AppendUint64(data, uint64(b.Nonce))
+	data = binary.LittleEndian.AppendUint64(data, uint64(b.Timestamp))
+	data = append(data, []byte(b.Miner)...)
 
 	return sha256.Sum256(data)
 }
 
-func (b *Block) Nonce() *uint256.Int {
-	return b.nonce
-}
-
 func (b *Block) VerifyTransactions() bool {
-	for _, tx := range b.transactions {
+	for _, tx := range b.Transactions {
 		if !tx.Verify() {
 			return false
 		}
@@ -145,17 +130,16 @@ func (b *Block) VerifyTransactions() bool {
 }
 
 func (b *Block) calculateHashBounds() {
-	digits := 77 - b.difficulty/3
-	divisor := math.Pow(2, float64(b.difficulty%3))
+	digits := 77 - b.Difficulty/3
+	divisor := math.Pow(2, float64(b.Difficulty%3))
 
-	lower := PI.Clone()
+	lower := pi.Clone()
 	div := uint256.NewInt(10)
 	exp := uint256.NewInt(uint64(digits))
 
 	div.Exp(div, exp)
 	lower.Div(lower, div)
 	lower.Mul(lower, div)
-	lower.SubUint64(lower, 1)
 
 	div.Div(div, uint256.NewInt(uint64(divisor)))
 
@@ -166,26 +150,29 @@ func (b *Block) calculateHashBounds() {
 	b.hashUpper = upper
 }
 
-func (b *Block) ValidHash() bool {
+func (b *Block) VerifyHash() bool {
 	hash := b.uint256Hash()
 
 	return hash.Gt(b.hashLower) && hash.Lt(b.hashUpper)
 }
 
-func (b *Block) ValidBlock() bool {
-	if b.genesis {
-		return b.ValidHash() &&
+func (b *Block) Verify() bool {
+	if b.Genesis {
+		return b.VerifyHash() &&
 			b.VerifyTransactions()
 	}
 
-	return b.ValidHash() &&
+	return b.VerifyHash() &&
 		b.VerifyTransactions() &&
-		len(b.transactions) > 0
+		len(b.Transactions) > 0
 }
 
 func (b *Block) Mine() {
-	one := uint256.NewInt(1)
-	for !b.ValidHash() {
-		b.nonce.Add(b.nonce, one)
+	if b.hashLower == nil || b.hashUpper == nil {
+		b.calculateHashBounds()
+	}
+
+	for !b.VerifyHash() {
+		b.Nonce += 1
 	}
 }
