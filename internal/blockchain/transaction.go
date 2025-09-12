@@ -8,10 +8,10 @@ import (
 )
 
 type Transaction struct {
-	Sender    ed25519.PublicKey
-	Receiver  ed25519.PublicKey
-	Value     uint64
-	Signature []byte
+	Sender    ed25519.PublicKey `json:"sender"`
+	Receiver  ed25519.PublicKey `json:"receiver"`
+	Value     uint64            `json:"value"`
+	Signature []byte            `json:"signature"`
 }
 
 func (tx *Transaction) Clone() Transaction {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -13,23 +14,36 @@ import (
 	"github.com/holiman/uint256"
 )
 
+var (
+	ErrNoTransactions  = errors.New("no transactions in block")
+	ErrHashOutOfBounds = errors.New("hash is not within required boundaries")
+)
+
+type ErrInvalidTransaction struct {
+	tx Transaction
+}
+
+func (e *ErrInvalidTransaction) Error() string {
+	return fmt.Sprintf("invalid transaction %+v", e.tx)
+}
+
 var pi, _ = uint256.FromDecimal("31415926535897932384626433832795028841971693993751058209749445923078164062862")
 
 type Block struct {
-	Difficulty   int
-	PrevBlock    [32]byte
-	Nonce        uint64
-	Transactions []Transaction
-	Timestamp    int64
-	Miner        ed25519.PublicKey
-	Genesis      bool
+	Difficulty   int               `json:"difficulty"`
+	PrevBlock    [32]byte          `json:"previous_block"`
+	Nonce        uint64            `json:"nonce"`
+	Transactions []Transaction     `json:"transactions"`
+	Timestamp    int64             `json:"timestamp"`
+	Miner        ed25519.PublicKey `json:"miner"`
+	Genesis      bool              `json:"genesis"`
 
 	hashLower *uint256.Int // Valid hash lower bound
 	hashUpper *uint256.Int // Valid hash upper bound
 }
 
 func NewGenesisBlock(difficulty int, miner ed25519.PublicKey) Block {
-	return Block{
+	b := Block{
 		Difficulty:   difficulty,
 		PrevBlock:    [32]byte{},
 		Transactions: []Transaction{},
@@ -38,10 +52,12 @@ func NewGenesisBlock(difficulty int, miner ed25519.PublicKey) Block {
 		Miner:        miner,
 		Genesis:      true,
 	}
+	b.calculateHashBounds()
+	return b
 }
 
 func NewBlock(prevBlock [32]byte, txs []Transaction, difficulty int, miner ed25519.PublicKey) Block {
-	return Block{
+	b := Block{
 		Difficulty:   difficulty,
 		PrevBlock:    prevBlock,
 		Transactions: txs,
@@ -50,6 +66,8 @@ func NewBlock(prevBlock [32]byte, txs []Transaction, difficulty int, miner ed255
 		Miner:        miner,
 		Genesis:      false,
 	}
+	b.calculateHashBounds()
+	return b
 }
 
 // This might be avoided by creating a new struct MinedBlock which is immutable and returned by Mine()
@@ -119,13 +137,13 @@ func (b *Block) Hash() [32]byte {
 	return sha256.Sum256(data)
 }
 
-func (b *Block) VerifyTransactions() bool {
+func (b *Block) VerifyTransactions() error {
 	for _, tx := range b.Transactions {
 		if !tx.Verify() {
-			return false
+			return &ErrInvalidTransaction{tx: tx}
 		}
 	}
-	return true
+	return nil
 
 }
 
@@ -150,29 +168,36 @@ func (b *Block) calculateHashBounds() {
 	b.hashUpper = upper
 }
 
-func (b *Block) VerifyHash() bool {
+func (b *Block) VerifyHash() error {
 	hash := b.uint256Hash()
 
-	return hash.Gt(b.hashLower) && hash.Lt(b.hashUpper)
-}
-
-func (b *Block) Verify() bool {
-	if b.Genesis {
-		return b.VerifyHash() &&
-			b.VerifyTransactions()
-	}
-
-	return b.VerifyHash() &&
-		b.VerifyTransactions() &&
-		len(b.Transactions) > 0
-}
-
-func (b *Block) Mine() {
 	if b.hashLower == nil || b.hashUpper == nil {
 		b.calculateHashBounds()
 	}
 
-	for !b.VerifyHash() {
+	if !hash.Gt(b.hashLower) || !hash.Lt(b.hashUpper) {
+		return ErrHashOutOfBounds
+	}
+
+	return nil
+}
+
+func (b *Block) Verify() error {
+	if err := b.VerifyHash(); err != nil {
+		return err
+	}
+	if err := b.VerifyTransactions(); err != nil {
+		return err
+	}
+	if !b.Genesis && len(b.Transactions) < 1 {
+		return ErrNoTransactions
+	}
+
+	return nil
+}
+
+func (b *Block) Mine() {
+	for b.VerifyHash() != nil {
 		b.Nonce += 1
 	}
 }
