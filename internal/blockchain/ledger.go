@@ -7,118 +7,209 @@ import (
 	"fmt"
 	"maps"
 	"sync"
+
+	"github.com/holiman/uint256"
 )
 
 const MINER_REWARD = 10 // absolutely arbitrary
 
-var ErrInvalidBlock = errors.New("block is not valid")
-var ErrInsufficientBalance = errors.New("insufficient balance for transaction")
+var (
+	ErrInsufficientBalance = errors.New("insufficient balance for transaction")
+)
 
-type Ledger struct {
-	head     *Block
-	blocks   map[[32]byte]*Block
-	balances map[[32]byte]uint64 // Public keys are represented as their sha256 hash since slices can't be map indexes
-
-	mu sync.RWMutex
-
-	// heads []*Block // could possibly be used to handle conflicting chains, but then the balance logic would need to be head-dependant; too complex for now
+type ErrPrevBlockNotFound struct {
+	hash [32]byte
 }
 
-func NewLedger(genesis Block) (*Ledger, error) {
-	c := Ledger{
-		blocks:   make(map[[32]byte]*Block),
-		balances: make(map[[32]byte]uint64),
+func (e *ErrPrevBlockNotFound) Error() string {
+	uint256Hash := uint256.NewInt(0)
+	uint256Hash.SetBytes(e.hash[:])
+	return fmt.Sprintf("previous block with hash %s could not be found", uint256Hash.Dec())
+}
+
+type balances struct {
+	balances map[[32]byte]uint64 // indexed by public key hash
+}
+
+func (b *balances) Clone() balances {
+	return balances{
+		balances: maps.Clone(b.balances),
+	}
+}
+
+func (b *balances) Get(pubkey ed25519.PublicKey) uint64 {
+	hash := sha256.Sum256(pubkey)
+	return b.balances[hash]
+}
+
+func (b *balances) Set(pubkey ed25519.PublicKey, bal uint64) {
+	hash := sha256.Sum256(pubkey)
+	b.balances[hash] = bal
+}
+
+func (b *balances) Increase(pubkey ed25519.PublicKey, n uint64) {
+	hash := sha256.Sum256(pubkey)
+	b.balances[hash] += n
+}
+
+func (b *balances) Decrease(pubkey ed25519.PublicKey, n uint64) {
+	hash := sha256.Sum256(pubkey)
+	b.balances[hash] -= n
+}
+
+type head struct {
+	block    *Block
+	length   int
+	balances balances
+}
+
+func (h *head) Update(b *Block) error {
+	if b.PrevBlock != h.block.Hash() {
+		panic("what in the heck")
 	}
 
-	err := c.AddBlock(genesis)
-	if err != nil {
-		return nil, fmt.Errorf("making new blockchain from genesis block '%s': %w", genesis.String(), err)
+	balances := h.balances.Clone()
+
+	for _, tx := range b.Transactions {
+		if balances.Get(tx.Sender) < tx.Value {
+			return ErrInsufficientBalance
+		}
+
+		balances.Decrease(tx.Sender, tx.Value)
+		balances.Increase(tx.Receiver, tx.Value)
+	}
+
+	balances.Increase(b.Miner, MINER_REWARD)
+
+	h.balances = balances
+	h.block = b
+	h.length++
+
+	return nil
+}
+
+type Ledger struct {
+	blocks map[[32]byte]*Block // All known, verified blocks
+	heads  []*head             // All possible heads of chains from the known blocks
+	head   *head               // The longest head (chain with most work)
+
+	mu sync.RWMutex
+}
+
+func NewLedger(difficulty int) (*Ledger, error) {
+	genesis := NewGenesisBlock(difficulty)
+	genesis.Mine()
+
+	balances := balances{
+		balances: map[[32]byte]uint64{},
+	}
+
+	h := &head{
+		block:    &genesis,
+		length:   1,
+		balances: balances,
+	}
+
+	blocks := map[[32]byte]*Block{}
+	blocks[genesis.Hash()] = &genesis
+
+	c := Ledger{
+		blocks: blocks,
+		heads:  []*head{h},
+		head:   h,
 	}
 
 	return &c, nil
 }
 
-func (l *Ledger) Head() Block {
-	return l.head.Clone()
+func (l *Ledger) getHead(hash [32]byte) (*head, bool) {
+	for _, h := range l.heads {
+		if h.block.Hash() == hash {
+			return h, true
+		}
+	}
+	return nil, false
+}
+
+func (l *Ledger) getChain(hash [32]byte) []*Block {
+	chain := []*Block{}
+
+	for {
+		block, ok := l.blocks[hash]
+		if !ok {
+			break
+		}
+
+		chain = append(chain, block)
+		hash = block.PrevBlock
+	}
+
+	if hash != [32]byte{} {
+		panic("oh no")
+	}
+
+	return chain
+}
+
+func (l *Ledger) headFromBlock(hash [32]byte) *head {
+	c := l.getChain(hash)
+	genesis := c[len(c)-1]
+
+	h := head{
+		block:  genesis,
+		length: 1,
+		balances: balances{
+			balances: map[[32]byte]uint64{},
+		},
+	}
+
+	for i := len(c) - 2; i >= 0; i-- {
+		h.Update(c[i])
+	}
+
+	return &h
 }
 
 func (l *Ledger) AddBlock(b Block) error {
 	b = b.Clone()
 
-	if b.Verify() != nil || (l.head != nil && b.PrevBlock != l.head.Hash()) {
-		return ErrInvalidBlock
+	if err := b.Verify(); err != nil {
+		return err
 	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	err := l.updateBalances(b)
+	if _, ok := l.blocks[b.PrevBlock]; !ok {
+		return &ErrPrevBlockNotFound{hash: b.PrevBlock}
+	}
+
+	h, ok := l.getHead(b.PrevBlock)
+	if !ok {
+		h = l.headFromBlock(b.PrevBlock)
+	}
+
+	err := h.Update(&b)
 	if err != nil {
 		return err
 	}
-
-	hash := b.Hash()
-	l.head = &b
-	l.blocks[hash] = l.head
-
-	return nil
-}
-
-func (l *Ledger) cloneBalances() map[[32]byte]uint64 {
-	clone := make(map[[32]byte]uint64)
-	maps.Copy(clone, l.balances)
-	return clone
-}
-
-func (l *Ledger) updateBalances(b Block) error {
-	balances := l.cloneBalances()
-
-	for _, tx := range b.Transactions {
-		if balance(balances, tx.Sender) < tx.Value {
-			return ErrInsufficientBalance
-		}
-
-		decreaseBalance(balances, tx.Sender, tx.Value)
-		increaseBalance(balances, tx.Receiver, tx.Value)
+	if h.length > l.head.length {
+		l.head = h
 	}
 
-	increaseBalance(balances, b.Miner, MINER_REWARD)
-
-	l.balances = balances
+	l.blocks[b.Hash()] = &b
 
 	return nil
 }
 
-func (l *Ledger) Block(hash [32]byte) *Block {
+func (l *Ledger) Head() Block {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-
-	return l.blocks[hash]
+	return l.head.block.Clone()
 }
 
 func (l *Ledger) Balance(pubkey ed25519.PublicKey) uint64 {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-
-	return balance(l.balances, pubkey)
-}
-
-func balance(balances map[[32]byte]uint64, pubkey ed25519.PublicKey) uint64 {
-	hash := sha256.Sum256(pubkey)
-	return balances[hash]
-}
-
-func updateBalance(balances map[[32]byte]uint64, pubkey ed25519.PublicKey, bal uint64) {
-	hash := sha256.Sum256(pubkey)
-	balances[hash] = bal
-}
-
-func increaseBalance(balances map[[32]byte]uint64, pubkey ed25519.PublicKey, n uint64) {
-	hash := sha256.Sum256(pubkey)
-	balances[hash] += n
-}
-
-func decreaseBalance(balances map[[32]byte]uint64, pubkey ed25519.PublicKey, n uint64) {
-	hash := sha256.Sum256(pubkey)
-	balances[hash] -= n
+	return l.head.balances.Get(pubkey)
 }

@@ -15,7 +15,6 @@ import (
 )
 
 var (
-	ErrNoTransactions  = errors.New("no transactions in block")
 	ErrHashOutOfBounds = errors.New("hash is not within required boundaries")
 )
 
@@ -42,14 +41,14 @@ type Block struct {
 	hashUpper *uint256.Int // Valid hash upper bound
 }
 
-func NewGenesisBlock(difficulty int, miner ed25519.PublicKey) Block {
+func NewGenesisBlock(difficulty int) Block {
 	b := Block{
 		Difficulty:   difficulty,
 		PrevBlock:    [32]byte{},
 		Transactions: []Transaction{},
 		Nonce:        0,
 		Timestamp:    time.Now().Unix(),
-		Miner:        miner,
+		Miner:        ed25519.PublicKey{},
 		Genesis:      true,
 	}
 	b.calculateHashBounds()
@@ -120,8 +119,8 @@ func (b *Block) String() string {
 		b.Timestamp,
 		hex.EncodeToString(b.Miner),
 		b.Genesis,
-		b.VerifyHash(),
-		b.VerifyTransactions(),
+		b.VerifyHash() == nil,
+		b.VerifyTransactions() == nil,
 	)
 }
 
@@ -188,9 +187,6 @@ func (b *Block) Verify() error {
 	}
 	if err := b.VerifyTransactions(); err != nil {
 		return err
-	}
-	if !b.Genesis && len(b.Transactions) < 1 {
-		return ErrNoTransactions
 	}
 
 	return nil

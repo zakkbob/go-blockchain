@@ -14,7 +14,7 @@ func TestMarshalBlock(t *testing.T) {
 
 	tx := addr1.NewTransaction(addr2.PublicKey(), 8)
 
-	b := blockchain.NewGenesisBlock(10, addr1.PublicKey())
+	b := blockchain.NewGenesisBlock(10)
 	b.Transactions = append(b.Transactions, tx)
 
 	js, err := json.MarshalIndent(b, "", "\t")

@@ -25,7 +25,7 @@ func TestNewBlockHandler(t *testing.T) {
 	addr1 := blockchain.GenerateTestAddress(t)
 	addr2 := blockchain.GenerateTestAddress(t)
 
-	ledger, genesis := blockchain.NewTestLedger(t, 3, addr1.PublicKey())
+	ledger, genesis := blockchain.NewTestLedger(t, 3)
 
 	app := application{
 		config: config{
