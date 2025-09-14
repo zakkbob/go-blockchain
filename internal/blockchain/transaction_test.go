@@ -3,13 +3,11 @@ package blockchain_test
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/zakkbob/go-blockchain/internal/blockchain"
 )
 
 func TestMarshalTransaction(t *testing.T) {
-	addr1 := blockchain.GenerateTestAddress(t)
-	addr2 := blockchain.GenerateTestAddress(t)
+	addr1 := MustGenerateTestAddress(t)
+	addr2 := MustGenerateTestAddress(t)
 
 	tx := addr1.NewTransaction(addr2.PublicKey(), 8)
 

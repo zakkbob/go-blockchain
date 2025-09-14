@@ -4,6 +4,8 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
+	"fmt"
 	"slices"
 )
 
@@ -12,6 +14,15 @@ type Transaction struct {
 	Receiver  ed25519.PublicKey `json:"receiver"`
 	Value     uint64            `json:"value"`
 	Signature []byte            `json:"signature"`
+}
+
+func (tx Transaction) String() string {
+	return fmt.Sprintf("{Sender:%s Receiver:%s Value:%d Signature:%s}",
+		hex.EncodeToString(tx.Sender),
+		hex.EncodeToString(tx.Receiver),
+		tx.Value,
+		hex.EncodeToString(tx.Signature),
+	)
 }
 
 func (tx *Transaction) Clone() Transaction {

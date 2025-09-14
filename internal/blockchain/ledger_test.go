@@ -7,46 +7,80 @@ import (
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
 )
 
-func TestLedger(t *testing.T) {
-	miner1 := blockchain.GenerateTestAddress(t)
-	miner2 := blockchain.GenerateTestAddress(t)
-	miner3 := blockchain.GenerateTestAddress(t)
+func TestLedgerAddBlock(t *testing.T) {
+	miner := MustGenerateTestAddress(t)
 
-	blockchain.NewTestLedger(t, 2)
-	c, err := blockchain.NewLedger(2)
-	if err != nil {
-		t.Fatalf("New should not return error: %v", err)
+	l, _ := MustCreateTestLedger(t)
+	AssertAddressBalance(t, l, miner, 0)
+
+	MustAddNewTestBlock(t, l, []blockchain.Transaction{}, miner.PublicKey())
+	AssertAddressBalance(t, l, miner, 10)
+}
+
+func TestLedgerTransaction(t *testing.T) {
+	miner1 := MustGenerateTestAddress(t)
+	miner2 := MustGenerateTestAddress(t)
+
+	tests := []struct {
+		name                string
+		tx                  blockchain.Transaction
+		wantErrIs           error
+		wantErrAs           any
+		wantMinerOneBalance uint64
+		wantMinerTwoBalance uint64
+	}{
+		{
+			name:                "Valid transaction",
+			tx:                  miner1.NewTransaction(miner2.PublicKey(), 8),
+			wantErrIs:           nil,
+			wantMinerOneBalance: 12,
+			wantMinerTwoBalance: 8,
+		},
+		{
+			name:                "Insufficient balance",
+			tx:                  miner1.NewTransaction(miner2.PublicKey(), 12),
+			wantErrIs:           blockchain.ErrInsufficientBalance,
+			wantMinerOneBalance: 10,
+			wantMinerTwoBalance: 0,
+		},
+		{
+			name:                "Transaction of zero",
+			tx:                  miner1.NewTransaction(miner2.PublicKey(), 0),
+			wantErrAs:           &blockchain.ErrInvalidTransaction{},
+			wantMinerOneBalance: 10,
+			wantMinerTwoBalance: 0,
+		},
+		{
+			name: "Unsigned transaction",
+			tx: blockchain.Transaction{
+				Sender:    miner1.PublicKey(),
+				Receiver:  miner2.PublicKey(),
+				Value:     2,
+				Signature: []byte{},
+			},
+			wantErrAs:           &blockchain.ErrInvalidTransaction{},
+			wantMinerOneBalance: 10,
+			wantMinerTwoBalance: 0,
+		},
 	}
 
-	blockchain.AssertAddressBalance(t, c, miner1, 0)
-	blockchain.AssertAddressBalance(t, c, miner2, 0)
-	blockchain.AssertAddressBalance(t, c, miner3, 0)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l, _ := MustCreateTestLedger(t)
 
-	head := c.Head()
-	b := blockchain.NewBlock(head.Hash(), []blockchain.Transaction{}, 2, miner2.PublicKey())
-	b.Mine()
+			MustAddNewTestBlock(t, l, []blockchain.Transaction{}, miner1.PublicKey())
+			err := AddNewTestBlock(t, l, []blockchain.Transaction{tt.tx}, miner1.PublicKey())
 
-	err = c.AddBlock(b)
-	if err != nil {
-		t.Fatalf("AddBlock should not return error: %v", err)
+			if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+				t.Errorf("AddBlock should return %v, not %v", tt.wantErrIs, err)
+			}
+			if tt.wantErrAs != nil && !errors.As(err, tt.wantErrAs) {
+				t.Errorf("AddBlock should return error of type %v, not %v", tt.wantErrAs, err)
+			}
+
+			AssertAddressBalance(t, l, miner1, tt.wantMinerOneBalance)
+			AssertAddressBalance(t, l, miner2, tt.wantMinerTwoBalance)
+
+		})
 	}
-
-	blockchain.AssertAddressBalance(t, c, miner1, 0)
-	blockchain.AssertAddressBalance(t, c, miner2, 10)
-	blockchain.AssertAddressBalance(t, c, miner3, 0)
-
-	head = c.Head()
-	b = blockchain.NewBlock(head.Hash(), []blockchain.Transaction{
-		miner2.NewTransaction(miner3.PublicKey(), 18),
-	}, 2, miner3.PublicKey())
-	b.Mine()
-
-	err = c.AddBlock(b)
-	if !errors.Is(err, blockchain.ErrInsufficientBalance) {
-		t.Fatalf("AddBlock should return error InsufficientBalance, not '%v'", err)
-	}
-
-	blockchain.AssertAddressBalance(t, c, miner1, 0)
-	blockchain.AssertAddressBalance(t, c, miner2, 10)
-	blockchain.AssertAddressBalance(t, c, miner3, 0)
 }

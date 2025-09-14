@@ -22,10 +22,10 @@ func (logger testLogger) Write(p []byte) (int, error) {
 }
 
 func TestNewBlockHandler(t *testing.T) {
-	addr1 := blockchain.GenerateTestAddress(t)
-	addr2 := blockchain.GenerateTestAddress(t)
+	addr1 := blockchain.MustGenerateTestAddress(t)
+	addr2 := blockchain.MustGenerateTestAddress(t)
 
-	ledger, genesis := blockchain.NewTestLedger(t, 3)
+	ledger, genesis := blockchain.MustCreateTestLedger(t)
 
 	app := application{
 		config: config{

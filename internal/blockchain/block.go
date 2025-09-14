@@ -22,7 +22,7 @@ type ErrInvalidTransaction struct {
 	tx Transaction
 }
 
-func (e *ErrInvalidTransaction) Error() string {
+func (e ErrInvalidTransaction) Error() string {
 	return fmt.Sprintf("invalid transaction %+v", e.tx)
 }
 
@@ -107,7 +107,7 @@ func (b *Block) uint256Hash() *uint256.Int {
 	return uint256Hash
 }
 
-func (b *Block) String() string {
+func (b Block) String() string {
 	hash := b.uint256Hash()
 	return fmt.Sprintf(
 		"Hash: %s; Previous Block: %s; Difficulty: %d; Transactions: %d; Nonce: %d; Timestamp: %d; Mined By: %s; Genesis: %t; Hash Satisfies Difficulty: %t; Verified Transactions: %t",
@@ -139,7 +139,7 @@ func (b *Block) Hash() [32]byte {
 func (b *Block) VerifyTransactions() error {
 	for _, tx := range b.Transactions {
 		if !tx.Verify() {
-			return &ErrInvalidTransaction{tx: tx}
+			return ErrInvalidTransaction{tx: tx}
 		}
 	}
 	return nil

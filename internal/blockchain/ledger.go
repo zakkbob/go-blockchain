@@ -21,7 +21,7 @@ type ErrPrevBlockNotFound struct {
 	hash [32]byte
 }
 
-func (e *ErrPrevBlockNotFound) Error() string {
+func (e ErrPrevBlockNotFound) Error() string {
 	uint256Hash := uint256.NewInt(0)
 	uint256Hash.SetBytes(e.hash[:])
 	return fmt.Sprintf("previous block with hash %s could not be found", uint256Hash.Dec())
@@ -71,6 +71,10 @@ func (h *head) Update(b *Block) error {
 	balances := h.balances.Clone()
 
 	for _, tx := range b.Transactions {
+		if tx.Value == 0 {
+			return ErrInvalidTransaction{tx: tx}
+		}
+
 		if balances.Get(tx.Sender) < tx.Value {
 			return ErrInsufficientBalance
 		}
@@ -181,7 +185,7 @@ func (l *Ledger) AddBlock(b Block) error {
 	defer l.mu.Unlock()
 
 	if _, ok := l.blocks[b.PrevBlock]; !ok {
-		return &ErrPrevBlockNotFound{hash: b.PrevBlock}
+		return ErrPrevBlockNotFound{hash: b.PrevBlock}
 	}
 
 	h, ok := l.getHead(b.PrevBlock)
