@@ -206,10 +206,11 @@ func (l *Ledger) AddBlock(b Block) error {
 	return nil
 }
 
-func (l *Ledger) Head() Block {
+func (l *Ledger) Head() *Block {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return l.head.block.Clone()
+	b := l.head.block.Clone()
+	return &b
 }
 
 func (l *Ledger) Balance(pubkey ed25519.PublicKey) uint64 {

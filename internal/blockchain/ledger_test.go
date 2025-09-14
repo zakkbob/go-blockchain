@@ -69,7 +69,7 @@ func TestLedgerTransaction(t *testing.T) {
 			l, _ := MustCreateTestLedger(t)
 
 			MustAddNewTestBlock(t, l, []blockchain.Transaction{}, miner1.PublicKey())
-			err := AddNewTestBlock(t, l, []blockchain.Transaction{tt.tx}, miner1.PublicKey())
+			_, err := AddNewTestBlock(t, l, []blockchain.Transaction{tt.tx}, miner1.PublicKey())
 
 			if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
 				t.Errorf("AddBlock should return %v, not %v", tt.wantErrIs, err)
@@ -83,4 +83,56 @@ func TestLedgerTransaction(t *testing.T) {
 
 		})
 	}
+}
+
+func TestLedgerNewHead(t *testing.T) {
+	miner := MustGenerateTestAddress(t)
+
+	l, genesis := MustCreateTestLedger(t)
+
+	block1 := blockchain.NewBlock(genesis.Hash(), []blockchain.Transaction{}, 0, miner.PublicKey())
+	block1.Mine()
+
+	blockA2 := blockchain.NewBlock(block1.Hash(), []blockchain.Transaction{}, 0, miner.PublicKey())
+	blockA2.Mine()
+	blockA3 := blockchain.NewBlock(blockA2.Hash(), []blockchain.Transaction{}, 0, miner.PublicKey())
+	blockA3.Mine()
+	blockA4 := blockchain.NewBlock(blockA2.Hash(), []blockchain.Transaction{}, 0, miner.PublicKey())
+	blockA4.Mine()
+
+	blockB2 := blockchain.NewBlock(block1.Hash(), []blockchain.Transaction{}, 0, miner.PublicKey())
+	blockB2.Mine()
+	blockB3 := blockchain.NewBlock(blockB2.Hash(), []blockchain.Transaction{}, 0, miner.PublicKey())
+	blockB3.Mine()
+
+	MustAddTestBlock(t, l, block1)
+	if l.Head().Hash() != block1.Hash() {
+		t.Error("head should be block1")
+	}
+
+	MustAddTestBlock(t, l, blockA2)
+	if l.Head().Hash() != blockA2.Hash() {
+		t.Error("head should be blockA2")
+	}
+
+	MustAddTestBlock(t, l, blockB2)
+	if l.Head().Hash() != blockA2.Hash() {
+		t.Error("head should be blockA2")
+	}
+
+	MustAddTestBlock(t, l, blockB3)
+	if l.Head().Hash() != blockB3.Hash() {
+		t.Error("head should be blockB3")
+	}
+
+	MustAddTestBlock(t, l, blockA3)
+	if l.Head().Hash() != blockB3.Hash() {
+		t.Error("head should be blockB3")
+	}
+
+	MustAddTestBlock(t, l, blockA4)
+	if l.Head().Hash() != blockA4.Hash() {
+		t.Error("head should be blockB3")
+	}
+
 }

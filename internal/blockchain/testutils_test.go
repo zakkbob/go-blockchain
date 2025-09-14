@@ -4,6 +4,7 @@ import (
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
 )
 
+var MustAddTestBlock = blockchain.MustAddTestBlock
 var AddNewTestBlock = blockchain.AddNewTestBlock
 var MustAddNewTestBlock = blockchain.MustAddNewTestBlock
 var AssertAddressBalance = blockchain.AssertAddressBalance
