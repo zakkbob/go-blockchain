@@ -11,7 +11,7 @@ func TestMarshalTransaction(t *testing.T) {
 
 	tx := addr1.NewTransaction(addr2.PublicKey(), 8)
 
-	js, err := json.MarshalIndent(tx, "", "\t")
+	js, err := json.Marshal(tx)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,14 +25,23 @@ func main() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
+	ledger, err := blockchain.NewLedger(10)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
+
 	app := application{
 		config: config{
 			debug: true,
 		},
 		logger: logger,
+		ledger: ledger,
 	}
 
-	err := http.ListenAndServe(fmt.Sprintf(":%d", port), app.routes())
+	logger.Info("starting server", "port", *port, "hash", ledger.Head().Hash())
+
+	err = http.ListenAndServe(fmt.Sprintf(":%d", *port), app.routes())
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)

@@ -17,7 +17,7 @@ func TestMarshalBlock(t *testing.T) {
 	b := blockchain.NewGenesisBlock(10)
 	b.Transactions = append(b.Transactions, tx)
 
-	js, err := json.MarshalIndent(b, "", "\t")
+	js, err := json.Marshal(b)
 	if err != nil {
 		t.Fatal(err)
 	}
