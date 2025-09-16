@@ -36,13 +36,10 @@ type Block struct {
 	Timestamp    int64             `json:"timestamp"`
 	Miner        ed25519.PublicKey `json:"miner"`
 	Genesis      bool              `json:"genesis"`
-
-	hashLower *uint256.Int // Valid hash lower bound
-	hashUpper *uint256.Int // Valid hash upper bound
 }
 
 func NewGenesisBlock(difficulty int) Block {
-	b := Block{
+	return Block{
 		Difficulty:   difficulty,
 		PrevBlock:    [32]byte{},
 		Transactions: []Transaction{},
@@ -51,12 +48,10 @@ func NewGenesisBlock(difficulty int) Block {
 		Miner:        ed25519.PublicKey{},
 		Genesis:      true,
 	}
-	b.calculateHashBounds()
-	return b
 }
 
 func NewBlock(prevBlock [32]byte, txs []Transaction, difficulty int, miner ed25519.PublicKey) Block {
-	b := Block{
+	return Block{
 		Difficulty:   difficulty,
 		PrevBlock:    prevBlock,
 		Transactions: txs,
@@ -65,8 +60,6 @@ func NewBlock(prevBlock [32]byte, txs []Transaction, difficulty int, miner ed255
 		Miner:        miner,
 		Genesis:      false,
 	}
-	b.calculateHashBounds()
-	return b
 }
 
 // This might be avoided by creating a new struct MinedBlock which is immutable and returned by Mine()
@@ -77,16 +70,6 @@ func (b *Block) Clone() Block {
 		newTxs[i] = tx.Clone()
 	}
 
-	var hashLower *uint256.Int = nil
-	var hashUpper *uint256.Int = nil
-
-	if b.hashLower != nil {
-		hashLower = b.hashLower.Clone()
-	}
-	if b.hashUpper != nil {
-		hashUpper = b.hashUpper.Clone()
-	}
-
 	return Block{
 		Difficulty:   b.Difficulty,
 		PrevBlock:    b.PrevBlock,
@@ -95,8 +78,6 @@ func (b *Block) Clone() Block {
 		Timestamp:    b.Timestamp,
 		Miner:        slices.Clone(b.Miner),
 		Genesis:      b.Genesis,
-		hashLower:    hashLower,
-		hashUpper:    hashUpper,
 	}
 }
 
@@ -125,28 +106,30 @@ func (b Block) String() string {
 }
 
 func (b *Block) Hash() [32]byte {
-	txsHash := hashTransactions(b.Transactions)
+	txsHash := HashTransactions(b.Transactions)
 
 	data := b.PrevBlock[:]
 	data = append(data, txsHash[:]...)
-	data = binary.LittleEndian.AppendUint64(data, uint64(b.Nonce))
-	data = binary.LittleEndian.AppendUint64(data, uint64(b.Timestamp))
 	data = append(data, []byte(b.Miner)...)
+	data = binary.LittleEndian.AppendUint64(data, uint64(b.Timestamp))
+	data = binary.LittleEndian.AppendUint64(data, uint64(b.Nonce))
 
 	return sha256.Sum256(data)
 }
 
 func (b *Block) VerifyTransactions() error {
 	for _, tx := range b.Transactions {
-		if !tx.Verify() {
-			return ErrInvalidTransaction{tx: tx}
+		if err := tx.Verify(); err != nil {
+			return err
 		}
 	}
 	return nil
 
 }
 
-func (b *Block) calculateHashBounds() {
+func (b *Block) VerifyHash() error {
+	hash := b.uint256Hash()
+
 	digits := 77 - b.Difficulty/3
 	divisor := math.Pow(2, float64(b.Difficulty%3))
 
@@ -163,18 +146,7 @@ func (b *Block) calculateHashBounds() {
 	upper := lower.Clone()
 	upper.Add(upper, div)
 
-	b.hashLower = lower
-	b.hashUpper = upper
-}
-
-func (b *Block) VerifyHash() error {
-	hash := b.uint256Hash()
-
-	if b.hashLower == nil || b.hashUpper == nil {
-		b.calculateHashBounds()
-	}
-
-	if !hash.Gt(b.hashLower) || !hash.Lt(b.hashUpper) {
+	if !hash.Gt(lower) || !hash.Lt(upper) {
 		return ErrHashOutOfBounds
 	}
 

@@ -63,6 +63,29 @@ type head struct {
 	balances balances
 }
 
+func (h *head) ConstructNextBlock(txPool map[[32]byte]Transaction, miner ed25519.PublicKey) Block {
+	balances := h.balances.Clone()
+
+	var txs []Transaction
+
+	for _, tx := range txPool {
+		if tx.Value == 0 {
+			panic("oh no")
+		}
+
+		if balances.Get(tx.Sender) < tx.Value {
+			continue
+		}
+
+		balances.Decrease(tx.Sender, tx.Value)
+		balances.Increase(tx.Receiver, tx.Value)
+
+		txs = append(txs, tx)
+	}
+
+	return NewBlock(h.block.Hash(), txs, h.block.Difficulty, miner)
+}
+
 func (h *head) Update(b *Block) error {
 	if b.PrevBlock != h.block.Hash() {
 		panic("what in the heck")
@@ -124,6 +147,14 @@ func NewLedger(difficulty int) (*Ledger, error) {
 	}
 
 	return &c, nil
+}
+
+func (l *Ledger) Length() int {
+	return l.head.length
+}
+
+func (l *Ledger) ConstructNextBlock(txPool map[[32]byte]Transaction, miner ed25519.PublicKey) Block {
+	return l.head.ConstructNextBlock(txPool, miner)
 }
 
 func (l *Ledger) getHead(hash [32]byte) (*head, bool) {

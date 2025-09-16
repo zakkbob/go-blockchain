@@ -34,9 +34,12 @@ func (tx *Transaction) Clone() Transaction {
 	}
 }
 
-func (tx *Transaction) Verify() bool {
+func (tx *Transaction) Verify() error {
 	hash := tx.Hash()
-	return ed25519.Verify(tx.Sender, hash[:], tx.Signature)
+	if !ed25519.Verify(tx.Sender, hash[:], tx.Signature) {
+		return ErrInvalidTransaction{tx: *tx}
+	}
+	return nil
 }
 
 func (tx *Transaction) Hash() [32]byte {
@@ -50,7 +53,7 @@ func hashTransaction(sender ed25519.PublicKey, receiver ed25519.PublicKey, value
 	return sha256.Sum256(data)
 }
 
-func hashTransactions(txs []Transaction) [32]byte {
+func HashTransactions(txs []Transaction) [32]byte {
 	var hashData []byte
 
 	for _, tx := range txs {
