@@ -19,7 +19,7 @@ func TestMiner(t *testing.T) {
 
 	m := miner.NewMiner(l, miner1.PublicKey())
 
-	m.Mine(1)
+	m.Mine(8)
 
 	time.Sleep(time.Second)
 
