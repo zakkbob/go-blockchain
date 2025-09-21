@@ -2,8 +2,7 @@ package gossip_test
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/netip"
 	"testing"
@@ -12,19 +11,27 @@ import (
 	"github.com/zakkbob/go-blockchain/internal/gossip"
 )
 
-func logHandler(messageType string, data json.RawMessage) {
-	fmt.Print(messageType, "lol")
+type testHandler struct {
+	Type string
+	Data json.RawMessage
+}
+
+func (t *testHandler) handle(messageType string, data json.RawMessage) {
+	t.Type = messageType
+	t.Data = data
 }
 
 func TestBootstrap(t *testing.T) {
+	handler := testHandler{}
+
 	n := gossip.Node{
 		Addr:     "127.0.0.1",
-		ErrorLog: log.Default(),
+		ErrorLog: slog.NewLogLogger(slog.DiscardHandler, slog.LevelDebug),
 	}
 
 	n.Bootstrap([]string{})
 	go func() {
-		n.Listen(logHandler)
+		n.Listen(handler.handle)
 	}()
 
 	lAddr, err := netip.ParseAddrPort("127.0.0.1:1234")
@@ -45,9 +52,13 @@ func TestBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	conn.Write([]byte(`{"message_type":steve,"data":""}`))
+	conn.Write([]byte(`{"message_type":"steve","data":""}`))
 
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 1)
+
+	if handler.Type != "steve" {
+		t.Errorf("I need steve")
+	}
 
 	conn.Close()
 }
