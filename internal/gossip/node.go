@@ -6,30 +6,60 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/netip"
 )
 
-const port = 3141
+type ReceivedMessage struct {
+	Type       string
+	RemoteAddr string
+	Data       json.RawMessage
+}
 
 type Message struct {
-	RemoteAddr netip.AddrPort
-	Type       string          `json:"message_type"`
-	Data       json.RawMessage `json:"data"`
+	Type string `json:"message_type"`
+	Data any    `json:"data"`
 }
 
 type Node struct {
 	Addr     string
 	ErrorLog *log.Logger
-	listener *net.TCPListener
+	handler  func(ReceivedMessage)
+	listener net.Listener
+	conns    []net.Conn
 }
 
-func (n *Node) Bootstrap(knownPeers []string) error {
-	ip, err := netip.ParseAddr(n.Addr)
+func (n *Node) ListenerAddr() net.Addr {
+	return n.listener.Addr()
+}
+
+func (n *Node) connectTo(knownPeers []string) error {
+	var errs []error
+
+	for _, peer := range knownPeers {
+		conn, err := net.Dial("tcp", peer)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		go n.handle(conn)
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
+}
+
+func (n *Node) Broadcast(m Message) error {
+	b, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
-	addr := net.TCPAddrFromAddrPort(netip.AddrPortFrom(ip, port))
-	n.listener, err = net.ListenTCP("tcp4", addr)
+
+	for _, c := range n.conns {
+		_, err = c.Write(b)
+	}
 	if err != nil {
 		return err
 	}
@@ -37,42 +67,54 @@ func (n *Node) Bootstrap(knownPeers []string) error {
 	return nil
 }
 
-func (n *Node) Listen(handler func(string, json.RawMessage)) {
-	for {
-		c, err := n.listener.AcceptTCP()
-		if err != nil {
-			n.ErrorLog.Printf("Failed to accept incoming connection: %v", err)
-			return
-		}
+func (n *Node) BootstrapAndListen(knownPeers []string, handler func(ReceivedMessage)) error {
+	n.handler = handler
 
-		go n.handle(c, handler)
+	n.connectTo(knownPeers)
+
+	var err error
+
+	n.listener, err = net.Listen("tcp", n.Addr)
+	if err != nil {
+		return err
 	}
 
+	for {
+		c, err := n.listener.Accept()
+		if err != nil {
+			n.ErrorLog.Printf("Failed to accept incoming connection: %v", err)
+			continue
+		}
+
+		go n.handle(c)
+	}
 }
 
-func (n *Node) handle(conn *net.TCPConn, handler func(string, json.RawMessage)) {
-	reader, writer := io.Pipe()
-	go func() {
-		_, err := conn.WriteTo(writer)
-		writer.Close()
-		if err != nil {
-			n.ErrorLog.Printf("Error reading from TCPConn: %v", err)
-		}
-	}()
+func (n *Node) handle(c net.Conn) {
+	n.conns = append(n.conns, c)
 
-	d := json.NewDecoder(reader)
+	d := json.NewDecoder(c)
 
 	for {
-		m := Message{}
+		m := struct {
+			Type string          `json:"message_type"`
+			Data json.RawMessage `json:"data"`
+		}{}
 
 		err := d.Decode(&m)
 		if errors.Is(err, io.EOF) {
 			return
 		} else if err != nil {
-			n.ErrorLog.Printf("Failed to decode message from %s: %v", conn.RemoteAddr().String(), err)
+			n.ErrorLog.Printf("Failed to decode message from %s: %v", c.RemoteAddr().String(), err)
 			continue
 		}
 
-		handler(m.Type, m.Data)
+		r := ReceivedMessage{
+			Type:       m.Type,
+			Data:       m.Data,
+			RemoteAddr: c.RemoteAddr().String(),
+		}
+
+		n.handler(r)
 	}
 }

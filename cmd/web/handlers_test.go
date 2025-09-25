@@ -1,23 +1,20 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"io"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
+	"github.com/zakkbob/go-blockchain/internal/gossip"
 )
 
 type testLogger struct {
 	t *testing.T
 }
 
-func (logger testLogger) Write(p []byte) (int, error) {
-	logger.t.Log(string(p))
+func (l testLogger) Write(p []byte) (int, error) {
+	l.t.Log(string(p))
 	return len(p), nil
 }
 
@@ -27,6 +24,8 @@ func TestNewBlockHandler(t *testing.T) {
 
 	ledger, genesis := blockchain.MustCreateTestLedger(t)
 
+	logger := slog.NewLogLogger(slog.NewTextHandler(testLogger{t}, nil), slog.LevelError)
+
 	app := application{
 		config: config{
 			debug: true,
@@ -35,38 +34,59 @@ func TestNewBlockHandler(t *testing.T) {
 		ledger: ledger,
 	}
 
-	srv := httptest.NewServer(app.routes())
+	node1 := gossip.Node{
+		Addr:     ":0",
+		ErrorLog: logger,
+	}
+
+	go func() {
+		err := node1.BootstrapAndListen([]string{}, app.handler)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	time.Sleep(time.Second)
+
+	node2 := gossip.Node{
+		Addr:     ":0",
+		ErrorLog: logger,
+	}
+
+	go func() {
+		err := node2.BootstrapAndListen([]string{node1.ListenerAddr().String()}, func(rm gossip.ReceivedMessage) { t.Fatal(rm) })
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	time.Sleep(time.Second)
+
+	block := blockchain.NewBlock(genesis.Hash(), []blockchain.Transaction{}, 3, addr1.PublicKey())
+	block.Mine()
 
 	tx := addr1.NewTransaction(addr2.PublicKey(), 5)
-
-	block := blockchain.NewBlock(genesis.Hash(), []blockchain.Transaction{tx}, 3, addr2.PublicKey())
-	block.Mine()
+	block2 := blockchain.NewBlock(block.Hash(), []blockchain.Transaction{tx}, 3, addr2.PublicKey())
+	block2.Mine()
 
 	if err := block.Verify(); err != nil {
 		t.Fatal(err)
 	}
 
-	body, err := json.Marshal(block)
-	if err != nil {
-		t.Fatal(err)
-	}
+	node2.Broadcast(gossip.Message{
+		Type: "newBlock",
+		Data: block2,
+	})
 
-	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/block", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
+	node2.Broadcast(gossip.Message{
+		Type: "newBlock",
+		Data: block,
+	})
 
-	res, err := http.DefaultClient.Do(req)
-	defer res.Body.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
+	node2.Broadcast(gossip.Message{
+		Type: "newBlock",
+		Data: block2,
+	})
 
-	body, err = io.ReadAll(res.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Log(string(body))
-	t.Log(ledger.Head())
+	time.Sleep(time.Second)
 }

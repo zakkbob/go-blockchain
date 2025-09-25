@@ -1,10 +1,8 @@
 package gossip_test
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net"
-	"net/netip"
 	"testing"
 	"time"
 
@@ -12,42 +10,32 @@ import (
 )
 
 type testHandler struct {
-	Type string
-	Data json.RawMessage
+	message gossip.ReceivedMessage
 }
 
-func (t *testHandler) handle(messageType string, data json.RawMessage) {
-	t.Type = messageType
-	t.Data = data
+func (t *testHandler) handle(message gossip.ReceivedMessage) {
+	t.message = message
 }
 
 func TestBootstrap(t *testing.T) {
 	handler := testHandler{}
 
 	n := gossip.Node{
-		Addr:     "127.0.0.1",
+		Addr:     ":0",
 		ErrorLog: slog.NewLogLogger(slog.DiscardHandler, slog.LevelDebug),
 	}
 
-	n.Bootstrap([]string{})
 	go func() {
-		n.Listen(handler.handle)
+		err := n.BootstrapAndListen([]string{}, handler.handle)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}()
 
-	lAddr, err := netip.ParseAddrPort("127.0.0.1:1234")
-	if err != nil {
-		t.Fatal(err)
-	}
+	time.Sleep(time.Second * 1)
+	t.Log(n.ListenerAddr())
 
-	rAddr, err := netip.ParseAddrPort("127.0.0.1:3141")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	lTCPAddr := net.TCPAddrFromAddrPort(lAddr)
-	rTCPAddr := net.TCPAddrFromAddrPort(rAddr)
-
-	conn, err := net.DialTCP("tcp4", lTCPAddr, rTCPAddr)
+	conn, err := net.Dial("tcp", n.ListenerAddr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +44,7 @@ func TestBootstrap(t *testing.T) {
 
 	time.Sleep(time.Second * 1)
 
-	if handler.Type != "steve" {
+	if handler.message.Type != "steve" {
 		t.Errorf("I need steve")
 	}
 

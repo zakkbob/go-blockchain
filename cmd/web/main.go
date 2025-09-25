@@ -2,12 +2,11 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
+	"github.com/zakkbob/go-blockchain/internal/gossip"
 )
 
 type config struct {
@@ -18,6 +17,7 @@ type application struct {
 	config config
 	logger *slog.Logger
 	ledger *blockchain.Ledger
+	node   *gossip.Node
 }
 
 func main() {
@@ -31,17 +31,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	node := &gossip.Node{
+		Addr:     ":3141",
+		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
+	}
+
 	app := application{
 		config: config{
 			debug: true,
 		},
 		logger: logger,
 		ledger: ledger,
+		node:   node,
 	}
 
 	logger.Info("starting server", "port", *port, "hash", ledger.Head().Hash())
 
-	err = http.ListenAndServe(fmt.Sprintf(":%d", *port), app.routes())
+	err = node.BootstrapAndListen([]string{}, app.handler)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
