@@ -31,8 +31,6 @@ type Miner struct {
 	wg             sync.WaitGroup
 }
 
-// ChangeBlock(block)
-
 func NewMiner(pubkey ed25519.PublicKey, workers int) *Miner {
 	m := &Miner{
 		pubkey:         pubkey,

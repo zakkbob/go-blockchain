@@ -1,12 +1,15 @@
 package main
 
 import (
+	"crypto/rand"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
 	"github.com/zakkbob/go-blockchain/internal/gossip"
+	"github.com/zakkbob/go-blockchain/internal/miner"
 )
 
 type config struct {
@@ -14,40 +17,56 @@ type config struct {
 }
 
 type application struct {
-	config config
-	logger *slog.Logger
-	ledger *blockchain.Ledger
-	node   *gossip.Node
+	config  config
+	address blockchain.Address
+	miner   *miner.Miner
+	logger  *slog.Logger
+	ledger  *blockchain.Ledger
+	node    *gossip.Node
 }
 
 func main() {
 	port := flag.Int("port", 4000, "API server port")
+	difficulty := flag.Int("difficulty", 10, "Mining difficulty")
+
+	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	ledger, err := blockchain.NewLedger(10)
+	ledger, err := blockchain.NewLedger(*difficulty)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
 
 	node := &gossip.Node{
-		Addr:     ":3141",
+		Addr:     fmt.Sprintf(":%d", *port),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
+
+	address, err := blockchain.GenerateAddress(rand.Reader)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
+	miner := miner.NewMiner(address.PublicKey(), 4)
 
 	app := application{
 		config: config{
 			debug: true,
 		},
-		logger: logger,
-		ledger: ledger,
-		node:   node,
+		address: address,
+		logger:  logger,
+		ledger:  ledger,
+		miner:   miner,
+		node:    node,
 	}
+
+	go app.processMinedBlocks()
 
 	logger.Info("starting server", "port", *port, "hash", ledger.Head().Hash())
 
-	err = node.BootstrapAndListen([]string{}, app.handler)
+	err = node.BootstrapAndListen([]string{"[::]:4100"}, app.handler)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
