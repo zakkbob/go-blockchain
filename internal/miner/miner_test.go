@@ -3,7 +3,6 @@ package miner_test
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
 	"github.com/zakkbob/go-blockchain/internal/miner"
@@ -12,16 +11,16 @@ import (
 func TestMiner(t *testing.T) {
 	miner1 := blockchain.MustGenerateTestAddress(t)
 
-	l, err := blockchain.NewLedger(10)
+	l, err := blockchain.NewLedger(2)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	m := miner.NewMiner(l, miner1.PublicKey())
+	b := l.ConstructNextBlock(map[[32]byte]blockchain.Transaction{}, miner1.PublicKey())
 
-	m.Mine(8)
+	m := miner.NewMiner(miner1.PublicKey(), 8)
 
-	time.Sleep(time.Second)
+	m.SetTargetBlock(b)
 
-	fmt.Print(l.Length())
+	fmt.Print(<-m.MinedBlocks)
 }

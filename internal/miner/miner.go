@@ -4,8 +4,8 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
 	"math"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
@@ -14,97 +14,43 @@ import (
 var pi, _ = uint256.FromDecimal("31415926535897932384626433832795028841971693993751058209749445923078164062862")
 
 type Miner struct {
+	MinedBlocks chan *blockchain.Block
+
 	pubkey           ed25519.PublicKey
-	ledger           *blockchain.Ledger
-	txPool           map[[32]byte]blockchain.Transaction
 	block            *blockchain.Block
 	partialBlockData []byte
 
-	nonceChan        chan uint64
-	correctNonceChan chan uint64
-	cancelChan       chan bool
+	stopped atomic.Bool
+
+	nonces         chan uint64
+	correctNonces  chan uint64
+	done           chan struct{}
+	stopGenerating chan struct{}
 }
 
-func NewMiner(l *blockchain.Ledger, pubkey ed25519.PublicKey) Miner {
-	return Miner{
-		ledger:           l,
-		txPool:           map[[32]byte]blockchain.Transaction{},
-		pubkey:           pubkey,
-		nonceChan:        make(chan uint64),
-		correctNonceChan: make(chan uint64),
-		cancelChan:       make(chan bool),
+// ChangeBlock(block)
+
+func NewMiner(pubkey ed25519.PublicKey, workers int) *Miner {
+	m := &Miner{
+		pubkey:         pubkey,
+		MinedBlocks:    make(chan *blockchain.Block),
+		nonces:         make(chan uint64),
+		correctNonces:  make(chan uint64),
+		stopGenerating: make(chan struct{}),
+		done:           make(chan struct{}),
 	}
-}
-
-func (m *Miner) AddBlock(b blockchain.Block) error {
-	oldHead := m.ledger.Head().Hash()
-
-	err := m.ledger.AddBlock(b)
-	if err != nil {
-		return err
-	}
-
-	if oldHead != m.ledger.Head().Hash() {
-		//m.updateBlock()
-	}
-	return nil
-}
-
-func (m *Miner) AddTransaction(tx blockchain.Transaction) error {
-	if err := tx.Verify(); err != nil {
-		return err
-	}
-	m.txPool[tx.Hash()] = tx
-	return nil
-}
-
-func (m *Miner) Mine(workers int) {
-	go func() {
-		var nonce uint64
-		var n uint64
-		for {
-			select {
-			case n = <-m.correctNonceChan:
-				m.block.Nonce = n
-				err := m.ledger.AddBlock(*m.block)
-				if err != nil {
-					fmt.Print(err)
-				}
-				m.updateBlock()
-
-			case _ = <-m.cancelChan:
-				close(m.cancelChan)
-				close(m.nonceChan)
-				return
-			case m.nonceChan <- nonce:
-				nonce++
-			}
-		}
-	}()
-
-	m.updateBlock()
 
 	for range workers {
-		go func() {
-			var nonce uint64
-			var data []byte
-			var hash [32]byte
-
-			for {
-				nonce = <-m.nonceChan
-				data = binary.LittleEndian.AppendUint64(m.partialBlockData, uint64(nonce))
-				hash = sha256.Sum256(data)
-
-				if m.checkHash(hash) {
-					m.correctNonceChan <- nonce
-				}
-			}
-		}()
+		go m.work()
 	}
+
+	return m
 }
 
-func (m *Miner) updateBlock() {
-	b := m.ledger.ConstructNextBlock(m.txPool, m.pubkey)
+func (m *Miner) SetTargetBlock(b blockchain.Block) {
+	close(m.stopGenerating)
+
+	b = b.Clone()
 	m.block = &b
 
 	txsHash := blockchain.HashTransactions(b.Transactions)
@@ -115,6 +61,63 @@ func (m *Miner) updateBlock() {
 	data = binary.LittleEndian.AppendUint64(data, uint64(b.Timestamp))
 
 	m.partialBlockData = data
+
+	m.stopGenerating = make(chan struct{})
+	go m.generateNonces()
+}
+
+func (m *Miner) Stop() {
+	if m.stopped.Load() {
+		panic("stopping stopped miner")
+	}
+
+	m.stopped.Store(true)
+	close(m.MinedBlocks)
+	close(m.nonces)
+	close(m.stopGenerating)
+	close(m.correctNonces)
+	close(m.done)
+}
+
+func (m *Miner) generateNonces() {
+	var nonce uint64
+	var n uint64
+	for {
+		select {
+		case n = <-m.correctNonces:
+			m.block.Nonce = n
+			m.MinedBlocks <- m.block
+			m.block = nil
+			return
+		case <-m.done:
+			return
+		case <-m.stopGenerating:
+			return
+		case m.nonces <- nonce:
+			nonce++
+		}
+	}
+}
+
+func (m *Miner) work() {
+	var nonce uint64
+	var data []byte
+	var hash [32]byte
+
+	for {
+		select {
+		case nonce = <-m.nonces:
+			data = binary.LittleEndian.AppendUint64(m.partialBlockData, uint64(nonce))
+			hash = sha256.Sum256(data)
+
+			if m.checkHash(hash) {
+				m.correctNonces <- nonce
+			}
+		case <-m.done:
+			return
+		}
+	}
+
 }
 
 func (m *Miner) checkHash(hash [32]byte) bool {
