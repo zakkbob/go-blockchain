@@ -1,7 +1,6 @@
 package miner_test
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
@@ -17,10 +16,13 @@ func TestMiner(t *testing.T) {
 	}
 
 	b := l.ConstructNextBlock(map[[32]byte]blockchain.Transaction{}, miner1.PublicKey())
-
 	m := miner.NewMiner(miner1.PublicKey(), 8)
-
 	m.SetTargetBlock(b)
+	mined := <-m.MinedBlocks
 
-	fmt.Print(<-m.MinedBlocks)
+	if mined.Verify() != nil {
+		t.Fatal("Mined block should be valid!")
+	}
+
+	m.Stop()
 }

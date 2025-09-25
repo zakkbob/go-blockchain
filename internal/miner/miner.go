@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"math"
+	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -19,13 +20,15 @@ type Miner struct {
 	pubkey           ed25519.PublicKey
 	block            *blockchain.Block
 	partialBlockData []byte
+	difficulty       int
 
 	stopped atomic.Bool
 
 	nonces         chan uint64
 	correctNonces  chan uint64
-	done           chan struct{}
+	stopWorking    chan struct{}
 	stopGenerating chan struct{}
+	wg             sync.WaitGroup
 }
 
 // ChangeBlock(block)
@@ -37,11 +40,11 @@ func NewMiner(pubkey ed25519.PublicKey, workers int) *Miner {
 		nonces:         make(chan uint64),
 		correctNonces:  make(chan uint64),
 		stopGenerating: make(chan struct{}),
-		done:           make(chan struct{}),
+		stopWorking:    make(chan struct{}),
 	}
 
 	for range workers {
-		go m.work()
+		m.wg.Go(m.work)
 	}
 
 	return m
@@ -52,6 +55,7 @@ func (m *Miner) SetTargetBlock(b blockchain.Block) {
 
 	b = b.Clone()
 	m.block = &b
+	m.difficulty = m.block.Difficulty
 
 	txsHash := blockchain.HashTransactions(b.Transactions)
 
@@ -71,12 +75,25 @@ func (m *Miner) Stop() {
 		panic("stopping stopped miner")
 	}
 
+	stopDraining := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case _ = <-m.correctNonces:
+			case <-stopDraining:
+				return
+			}
+		}
+	}()
+
 	m.stopped.Store(true)
-	close(m.MinedBlocks)
-	close(m.nonces)
+	close(m.stopWorking)
+	m.wg.Wait()
 	close(m.stopGenerating)
+	close(m.nonces)
 	close(m.correctNonces)
-	close(m.done)
+	close(stopDraining)
 }
 
 func (m *Miner) generateNonces() {
@@ -88,8 +105,6 @@ func (m *Miner) generateNonces() {
 			m.block.Nonce = n
 			m.MinedBlocks <- m.block
 			m.block = nil
-			return
-		case <-m.done:
 			return
 		case <-m.stopGenerating:
 			return
@@ -113,7 +128,7 @@ func (m *Miner) work() {
 			if m.checkHash(hash) {
 				m.correctNonces <- nonce
 			}
-		case <-m.done:
+		case <-m.stopWorking:
 			return
 		}
 	}
@@ -121,8 +136,8 @@ func (m *Miner) work() {
 }
 
 func (m *Miner) checkHash(hash [32]byte) bool {
-	digits := 77 - m.block.Difficulty/3
-	divisor := math.Pow(2, float64(m.block.Difficulty%3))
+	digits := 77 - m.difficulty/3
+	divisor := math.Pow(2, float64(m.difficulty%3))
 
 	lower := pi.Clone()
 	div := uint256.NewInt(10)
