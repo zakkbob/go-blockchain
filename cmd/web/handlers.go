@@ -10,10 +10,30 @@ import (
 
 func (app *application) handler(m gossip.ReceivedMessage) {
 	switch m.Type {
-	case "newBlock":
+	case msgNewBlock:
 		app.newBlockHandler(m)
+	case msgNewTransaction:
+		app.newTransactionHandler(m)
 	}
 
+}
+
+func (app *application) newTransactionHandler(m gossip.ReceivedMessage) {
+	var tx blockchain.Transaction
+
+	err := json.Unmarshal(m.Data, &tx)
+	if err != nil {
+		app.serverError(m, err)
+		return
+	}
+
+	if err = tx.Verify(); err != nil {
+		app.logger.Info("Transaction rejected", "remoteAddr", m.RemoteAddr, "error", err)
+		return
+	}
+
+	app.logger.Info("New transaction received", "remoteAddr", m.RemoteAddr, "transaction", tx.String())
+	app.txpool.Add(tx)
 }
 
 func (app *application) newBlockHandler(m gossip.ReceivedMessage) {

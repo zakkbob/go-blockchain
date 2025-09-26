@@ -9,6 +9,18 @@ import (
 	"slices"
 )
 
+type ErrInvalidTransaction struct {
+	reason string
+	tx     Transaction
+}
+
+func (e ErrInvalidTransaction) Error() string {
+	if e.reason != "" {
+		return fmt.Sprintf("invalid transaction (%s) %+v", e.reason, e.tx)
+	}
+	return fmt.Sprintf("invalid transaction %+v", e.tx)
+}
+
 type Transaction struct {
 	Sender    ed25519.PublicKey `json:"sender"`
 	Receiver  ed25519.PublicKey `json:"receiver"`
@@ -37,7 +49,10 @@ func (tx *Transaction) Clone() Transaction {
 func (tx *Transaction) Verify() error {
 	hash := tx.Hash()
 	if !ed25519.Verify(tx.Sender, hash[:], tx.Signature) {
-		return ErrInvalidTransaction{tx: *tx}
+		return ErrInvalidTransaction{tx: *tx, reason: "invalid signature"}
+	}
+	if tx.Value == 0 {
+		return ErrInvalidTransaction{tx: *tx, reason: "value is 0"}
 	}
 	return nil
 }

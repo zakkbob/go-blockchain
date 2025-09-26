@@ -18,14 +18,6 @@ var (
 	ErrHashOutOfBounds = errors.New("hash is not within required boundaries")
 )
 
-type ErrInvalidTransaction struct {
-	tx Transaction
-}
-
-func (e ErrInvalidTransaction) Error() string {
-	return fmt.Sprintf("invalid transaction %+v", e.tx)
-}
-
 var pi, _ = uint256.FromDecimal("31415926535897932384626433832795028841971693993751058209749445923078164062862")
 
 type Block struct {

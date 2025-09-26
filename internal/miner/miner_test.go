@@ -10,12 +10,8 @@ import (
 func TestMiner(t *testing.T) {
 	miner1 := blockchain.MustGenerateTestAddress(t)
 
-	l, err := blockchain.NewLedger(2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := blockchain.NewGenesisBlock(5)
 
-	b := l.ConstructNextBlock(map[[32]byte]blockchain.Transaction{}, miner1.PublicKey())
 	m := miner.NewMiner(miner1.PublicKey(), 8)
 	m.SetTargetBlock(b)
 	mined := <-m.MinedBlocks

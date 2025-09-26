@@ -32,7 +32,7 @@ func TestBootstrap(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(time.Second * 1)
+	time.Sleep(time.Millisecond)
 	t.Log(n.ListenerAddr())
 
 	conn, err := net.Dial("tcp", n.ListenerAddr().String())
@@ -42,7 +42,7 @@ func TestBootstrap(t *testing.T) {
 
 	conn.Write([]byte(`{"message_type":"steve","data":""}`))
 
-	time.Sleep(time.Second * 1)
+	time.Sleep(time.Millisecond)
 
 	if handler.message.Type != "steve" {
 		t.Errorf("I need steve")

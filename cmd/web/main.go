@@ -10,6 +10,7 @@ import (
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
 	"github.com/zakkbob/go-blockchain/internal/gossip"
 	"github.com/zakkbob/go-blockchain/internal/miner"
+	"github.com/zakkbob/go-blockchain/internal/txpool"
 )
 
 type config struct {
@@ -23,6 +24,7 @@ type application struct {
 	logger  *slog.Logger
 	ledger  *blockchain.Ledger
 	node    *gossip.Node
+	txpool  txpool.Pool
 }
 
 func main() {
@@ -60,6 +62,7 @@ func main() {
 		ledger:  ledger,
 		miner:   miner,
 		node:    node,
+		txpool:  txpool.Pool{},
 	}
 
 	go app.processMinedBlocks()

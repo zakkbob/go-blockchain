@@ -6,8 +6,35 @@ import (
 )
 
 func (app *application) updateMiningTarget() {
-	b := app.ledger.ConstructNextBlock(map[[32]byte]blockchain.Transaction{}, app.address.PublicKey())
+	b := app.constructNextBlock()
 	app.miner.SetTargetBlock(b)
+}
+
+func (app *application) constructNextBlock() blockchain.Block {
+	var (
+		prevHash   = app.ledger.HeadHash()
+		difficulty = app.ledger.CalculateFutureDifficulty()
+		balances   = app.ledger.Balances()
+		candidates = app.txpool.Get(100)
+		txs        = make([]blockchain.Transaction, 100)
+	)
+
+	for _, tx := range candidates {
+		if err := tx.Verify(); err != nil { //sanity check
+			panic("oh no")
+		}
+
+		if balances.Get(tx.Sender) < tx.Value {
+			continue
+		}
+
+		balances.Decrease(tx.Sender, tx.Value)
+		balances.Increase(tx.Receiver, tx.Value)
+
+		txs = append(candidates, tx)
+	}
+
+	return blockchain.NewBlock(prevHash, txs, difficulty, app.address.PublicKey())
 }
 
 func (app *application) processMinedBlocks() {
@@ -23,7 +50,7 @@ func (app *application) processMinedBlocks() {
 		}
 
 		app.node.Broadcast(gossip.Message{
-			Type: "newBlock",
+			Type: msgNewBlock,
 			Data: b,
 		})
 

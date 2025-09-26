@@ -27,32 +27,32 @@ func (e ErrPrevBlockNotFound) Error() string {
 	return fmt.Sprintf("previous block with hash %s could not be found", uint256Hash.Dec())
 }
 
-type balances struct {
+type Balances struct {
 	balances map[[32]byte]uint64 // indexed by public key hash
 }
 
-func (b *balances) Clone() balances {
-	return balances{
+func (b *Balances) Clone() Balances {
+	return Balances{
 		balances: maps.Clone(b.balances),
 	}
 }
 
-func (b *balances) Get(pubkey ed25519.PublicKey) uint64 {
+func (b *Balances) Get(pubkey ed25519.PublicKey) uint64 {
 	hash := sha256.Sum256(pubkey)
 	return b.balances[hash]
 }
 
-func (b *balances) Set(pubkey ed25519.PublicKey, bal uint64) {
+func (b *Balances) Set(pubkey ed25519.PublicKey, bal uint64) {
 	hash := sha256.Sum256(pubkey)
 	b.balances[hash] = bal
 }
 
-func (b *balances) Increase(pubkey ed25519.PublicKey, n uint64) {
+func (b *Balances) Increase(pubkey ed25519.PublicKey, n uint64) {
 	hash := sha256.Sum256(pubkey)
 	b.balances[hash] += n
 }
 
-func (b *balances) Decrease(pubkey ed25519.PublicKey, n uint64) {
+func (b *Balances) Decrease(pubkey ed25519.PublicKey, n uint64) {
 	hash := sha256.Sum256(pubkey)
 	b.balances[hash] -= n
 }
@@ -60,30 +60,7 @@ func (b *balances) Decrease(pubkey ed25519.PublicKey, n uint64) {
 type head struct {
 	block    *Block
 	length   int
-	balances balances
-}
-
-func (h *head) ConstructNextBlock(txPool map[[32]byte]Transaction, miner ed25519.PublicKey) Block {
-	balances := h.balances.Clone()
-
-	var txs []Transaction
-
-	for _, tx := range txPool {
-		if tx.Value == 0 {
-			panic("oh no")
-		}
-
-		if balances.Get(tx.Sender) < tx.Value {
-			continue
-		}
-
-		balances.Decrease(tx.Sender, tx.Value)
-		balances.Increase(tx.Receiver, tx.Value)
-
-		txs = append(txs, tx)
-	}
-
-	return NewBlock(h.block.Hash(), txs, h.block.Difficulty, miner)
+	balances Balances
 }
 
 func (h *head) Update(b *Block) error {
@@ -94,8 +71,8 @@ func (h *head) Update(b *Block) error {
 	balances := h.balances.Clone()
 
 	for _, tx := range b.Transactions {
-		if tx.Value == 0 {
-			return ErrInvalidTransaction{tx: tx}
+		if err := tx.Verify(); err != nil {
+			return err
 		}
 
 		if balances.Get(tx.Sender) < tx.Value {
@@ -127,7 +104,7 @@ func NewLedger(difficulty int) (*Ledger, error) {
 	genesis := NewGenesisBlock(difficulty)
 	genesis.Mine()
 
-	balances := balances{
+	balances := Balances{
 		balances: map[[32]byte]uint64{},
 	}
 
@@ -149,12 +126,24 @@ func NewLedger(difficulty int) (*Ledger, error) {
 	return &c, nil
 }
 
-func (l *Ledger) Length() int {
-	return l.head.length
+func (l *Ledger) CalculateFutureDifficulty() int {
+	return l.head.block.Difficulty
 }
 
-func (l *Ledger) ConstructNextBlock(txPool map[[32]byte]Transaction, miner ed25519.PublicKey) Block {
-	return l.head.ConstructNextBlock(txPool, miner)
+func (l *Ledger) HeadHash() [32]byte {
+	return l.Head().Hash()
+}
+
+func (l *Ledger) Balances() Balances {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.head.balances.Clone()
+}
+
+func (l *Ledger) Length() int {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.head.length
 }
 
 func (l *Ledger) getHead(hash [32]byte) (*head, bool) {
@@ -193,7 +182,7 @@ func (l *Ledger) headFromBlock(hash [32]byte) *head {
 	h := head{
 		block:  genesis,
 		length: 1,
-		balances: balances{
+		balances: Balances{
 			balances: map[[32]byte]uint64{},
 		},
 	}
