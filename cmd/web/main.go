@@ -18,31 +18,48 @@ type config struct {
 }
 
 type application struct {
-	config  config
-	address blockchain.Address
-	miner   *miner.Miner
-	logger  *slog.Logger
-	ledger  *blockchain.Ledger
-	node    *gossip.Node
-	txpool  txpool.Pool
+	config           config
+	address          blockchain.Address
+	miner            *miner.Miner
+	logger           *slog.Logger
+	ledger           *blockchain.Ledger
+	node             *gossip.Node
+	txpool           txpool.Pool
+	receivedMessages map[[32]byte]struct{}
 }
 
+type peersFlag []string
+
+func (p *peersFlag) String() string {
+	return fmt.Sprintf("%v", *p)
+}
+
+func (p *peersFlag) Set(value string) error {
+	*p = append(*p, value)
+	return nil
+}
+
+var port int
+var difficulty int
+var peers peersFlag
+
 func main() {
-	port := flag.Int("port", 4000, "API server port")
-	difficulty := flag.Int("difficulty", 10, "Mining difficulty")
+	flag.IntVar(&port, "port", 4000, "API server port")
+	flag.IntVar(&difficulty, "difficulty", 10, "Mining difficulty")
+	flag.Var(&peers, "peer", "Peers (can be used multiple times)")
 
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	ledger, err := blockchain.NewLedger(*difficulty)
+	ledger, err := blockchain.NewLedger(difficulty)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
 
 	node := &gossip.Node{
-		Addr:     fmt.Sprintf(":%d", *port),
+		Addr:     fmt.Sprintf(":%d", port),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
@@ -57,19 +74,20 @@ func main() {
 		config: config{
 			debug: true,
 		},
-		address: address,
-		logger:  logger,
-		ledger:  ledger,
-		miner:   miner,
-		node:    node,
-		txpool:  txpool.Pool{},
+		address:          address,
+		logger:           logger,
+		ledger:           ledger,
+		miner:            miner,
+		node:             node,
+		txpool:           txpool.Pool{},
+		receivedMessages: map[[32]byte]struct{}{},
 	}
 
 	go app.processMinedBlocks()
 
-	logger.Info("starting server", "port", *port, "hash", ledger.Head().Hash())
+	logger.Info("starting server", "port", port, "hash", ledger.Head().Hash())
 
-	err = node.BootstrapAndListen([]string{"[::]:4100"}, app.handler)
+	err = node.BootstrapAndListen(peers, app.handler)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)

@@ -1,6 +1,7 @@
 package gossip
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,14 @@ type ReceivedMessage struct {
 	Type       string
 	RemoteAddr string
 	Data       json.RawMessage
+}
+
+func (m *ReceivedMessage) Hash() [32]byte {
+	b := make([]byte, 0, len(m.Type)+len(m.RemoteAddr)+len(m.Data))
+	b = append(b, []byte(m.Type)...)
+	b = append(b, []byte(m.RemoteAddr)...)
+	b = append(b, []byte(m.Data)...)
+	return sha256.Sum256(b)
 }
 
 type Message struct {

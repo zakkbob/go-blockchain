@@ -16,7 +16,7 @@ func (app *application) constructNextBlock() blockchain.Block {
 		difficulty = app.ledger.CalculateFutureDifficulty()
 		balances   = app.ledger.Balances()
 		candidates = app.txpool.Get(100)
-		txs        = make([]blockchain.Transaction, 100)
+		txs        = make([]blockchain.Transaction, 0, 100)
 	)
 
 	for _, tx := range candidates {
