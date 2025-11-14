@@ -46,6 +46,7 @@ func (n *Node) connectTo(knownPeers []string) error {
 	for _, peer := range knownPeers {
 		conn, err := net.Dial("tcp", peer)
 		if err != nil {
+			n.ErrorLog.Printf("Failed to connect to peer %s: %v", peer, err)
 			errs = append(errs, err)
 			continue
 		}
