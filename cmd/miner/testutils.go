@@ -27,10 +27,10 @@ func CreateTestLogger(t *testing.T) *slog.Logger {
 	return slog.New(slog.NewTextHandler(testLogger{t}, nil))
 }
 
-func CreateTestNode(t *testing.T, logHandler slog.Handler) *gossip.Node {
+func CreateTestNode(t *testing.T, h slog.Handler) *gossip.Node {
 	t.Helper()
 	return &gossip.Node{
-		Addr:     ":0",
-		ErrorLog: slog.NewLogLogger(logHandler, slog.LevelError),
+		Addr:   ":0",
+		Logger: slog.New(h),
 	}
 }

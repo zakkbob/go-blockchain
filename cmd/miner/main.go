@@ -59,8 +59,8 @@ func main() {
 	}
 
 	node := &gossip.Node{
-		Addr:     fmt.Sprintf(":%d", port),
-		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
+		Addr:   fmt.Sprintf(":%d", port),
+		Logger: logger,
 	}
 
 	address, err := blockchain.GenerateAddress(rand.Reader)

@@ -1,11 +1,12 @@
 package gossip
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 )
 
@@ -30,7 +31,7 @@ type Message struct {
 
 type Node struct {
 	Addr     string
-	ErrorLog *log.Logger
+	Logger   *slog.Logger
 	handler  func(ReceivedMessage)
 	listener net.Listener
 	conns    []net.Conn
@@ -46,7 +47,7 @@ func (n *Node) connectTo(knownPeers []string) error {
 	for _, peer := range knownPeers {
 		conn, err := net.Dial("tcp", peer)
 		if err != nil {
-			n.ErrorLog.Printf("Failed to connect to peer %s: %v", peer, err)
+			n.Logger.Error("Failed to connect to peer", "peer", peer, "error", err)
 			errs = append(errs, err)
 			continue
 		}
@@ -92,7 +93,7 @@ func (n *Node) BootstrapAndListen(knownPeers []string, handler func(ReceivedMess
 	for {
 		c, err := n.listener.Accept()
 		if err != nil {
-			n.ErrorLog.Printf("Failed to accept incoming connection: %v", err)
+			n.Logger.Error("Failed to accept incoming connection", "error", err)
 			continue
 		}
 
@@ -103,7 +104,8 @@ func (n *Node) BootstrapAndListen(knownPeers []string, handler func(ReceivedMess
 func (n *Node) handle(c net.Conn) {
 	n.conns = append(n.conns, c)
 
-	d := json.NewDecoder(c)
+	raw := &bytes.Buffer{}
+	d := json.NewDecoder(io.TeeReader(c, raw))
 
 	for {
 		m := struct {
@@ -115,7 +117,7 @@ func (n *Node) handle(c net.Conn) {
 		if errors.Is(err, io.EOF) {
 			return
 		} else if err != nil {
-			n.ErrorLog.Printf("Failed to decode message from %s: %v", c.RemoteAddr().String(), err)
+			n.Logger.Error("Failed to decode received message", "message", raw.String(), "peer", c.RemoteAddr().String(), "error", err)
 			continue
 		}
 

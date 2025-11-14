@@ -21,8 +21,8 @@ func TestBootstrap(t *testing.T) {
 	handler := testHandler{}
 
 	n := gossip.Node{
-		Addr:     ":0",
-		ErrorLog: slog.NewLogLogger(slog.DiscardHandler, slog.LevelDebug),
+		Addr:   ":0",
+		Logger: slog.New(slog.DiscardHandler),
 	}
 
 	go func() {
