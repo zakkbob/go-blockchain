@@ -68,7 +68,7 @@ func main() {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
-	miner := miner.NewMiner(address.PublicKey(), 4)
+	miner := miner.NewMiner(address.PublicKey())
 
 	app := application{
 		config: config{

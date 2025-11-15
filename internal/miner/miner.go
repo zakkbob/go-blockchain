@@ -4,9 +4,9 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"sync"
-	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
@@ -22,34 +22,28 @@ type Miner struct {
 	partialBlockData []byte
 	difficulty       int
 
-	stopped atomic.Bool
+	sendCorrectNonceOnce sync.Once
+	stopOnce             sync.Once
 
-	nonces         chan uint64
-	correctNonces  chan uint64
-	stopWorking    chan struct{}
-	stopGenerating chan struct{}
-	wg             sync.WaitGroup
+	stopWorking chan struct{}
+	wg          sync.WaitGroup
 }
 
-func NewMiner(pubkey ed25519.PublicKey, workers int) *Miner {
+func NewMiner(pubkey ed25519.PublicKey) *Miner {
 	m := &Miner{
-		pubkey:         pubkey,
-		MinedBlocks:    make(chan *blockchain.Block),
-		nonces:         make(chan uint64),
-		correctNonces:  make(chan uint64),
-		stopGenerating: make(chan struct{}),
-		stopWorking:    make(chan struct{}),
-	}
-
-	for range workers {
-		m.wg.Go(m.work)
+		pubkey:      pubkey,
+		MinedBlocks: make(chan *blockchain.Block),
+		stopWorking: make(chan struct{}),
 	}
 
 	return m
 }
 
-func (m *Miner) SetTargetBlock(b blockchain.Block) {
-	close(m.stopGenerating)
+// Starts mining a block, using one worker
+// Can be called while already mining
+func (m *Miner) Mine(b blockchain.Block) {
+	fmt.Println("Starting new mining work")
+	m.Stop()
 
 	b = b.Clone()
 	m.block = &b
@@ -64,52 +58,30 @@ func (m *Miner) SetTargetBlock(b blockchain.Block) {
 
 	m.partialBlockData = data
 
-	m.stopGenerating = make(chan struct{})
-	go m.generateNonces()
+	m.stopWorking = make(chan struct{})
+	m.sendCorrectNonceOnce = sync.Once{}
+	m.stopOnce = sync.Once{}
+
+	m.wg.Go(func() {
+		m.work()
+	})
 }
 
+// Stops mining, can be called multiple times safely
 func (m *Miner) Stop() {
-	if m.stopped.Load() {
-		panic("stopping stopped miner")
-	}
-
-	stopDraining := make(chan struct{})
-
-	go func() {
-		for {
-			select {
-			case _ = <-m.correctNonces:
-			case <-stopDraining:
-				return
-			}
-		}
-	}()
-
-	m.stopped.Store(true)
-	close(m.stopWorking)
-	m.wg.Wait()
-	close(m.stopGenerating)
-	close(m.nonces)
-	close(m.correctNonces)
-	close(stopDraining)
+	m.stopOnce.Do(func() {
+		close(m.stopWorking)
+		m.wg.Wait()
+	})
 }
 
-func (m *Miner) generateNonces() {
-	var nonce uint64
-	var n uint64
-	for {
-		select {
-		case n = <-m.correctNonces:
-			m.block.Nonce = n
-			m.MinedBlocks <- m.block
-			m.block = nil
-			return
-		case <-m.stopGenerating:
-			return
-		case m.nonces <- nonce:
-			nonce++
-		}
-	}
+func (m *Miner) processCorrectNonce(n uint64) {
+	m.sendCorrectNonceOnce.Do(func() {
+		m.block.Nonce = n
+		m.MinedBlocks <- m.block
+		m.partialBlockData = nil
+		m.block = nil
+	})
 }
 
 func (m *Miner) work() {
@@ -119,15 +91,17 @@ func (m *Miner) work() {
 
 	for {
 		select {
-		case nonce = <-m.nonces:
+		case <-m.stopWorking:
+			return
+		default:
 			data = binary.LittleEndian.AppendUint64(m.partialBlockData, uint64(nonce))
 			hash = sha256.Sum256(data)
 
 			if m.checkHash(hash) {
-				m.correctNonces <- nonce
+				m.processCorrectNonce(nonce)
 			}
-		case <-m.stopWorking:
-			return
+
+			nonce++
 		}
 	}
 

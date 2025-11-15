@@ -7,7 +7,7 @@ import (
 
 func (app *application) updateMiningTarget() {
 	b := app.constructNextBlock()
-	app.miner.SetTargetBlock(b)
+	app.miner.Mine(b)
 }
 
 func (app *application) constructNextBlock() blockchain.Block {

@@ -12,8 +12,8 @@ func TestMiner(t *testing.T) {
 
 	b := blockchain.NewGenesisBlock(5)
 
-	m := miner.NewMiner(miner1.PublicKey(), 8)
-	m.SetTargetBlock(b)
+	m := miner.NewMiner(miner1.PublicKey())
+	m.Mine(b)
 	mined := <-m.MinedBlocks
 
 	if mined.Verify() != nil {
