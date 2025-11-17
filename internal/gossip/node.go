@@ -34,17 +34,17 @@ type Node struct {
 	Logger   *slog.Logger
 	handler  func(ReceivedMessage)
 	listener net.Listener
-	conns    []net.Conn
+	peers    []Peer
 }
 
 func (n *Node) ListenerAddr() net.Addr {
 	return n.listener.Addr()
 }
 
-func (n *Node) connectTo(knownPeers []string) error {
+func (n *Node) connectTo(peers []string) error {
 	var errs []error
 
-	for _, peer := range knownPeers {
+	for _, peer := range peers {
 		conn, err := net.Dial("tcp", peer)
 		if err != nil {
 			n.Logger.Error("Failed to connect to peer", "peer", peer, "error", err)
@@ -95,6 +95,8 @@ func (n *Node) BootstrapAndListen(knownPeers []string, handler func(ReceivedMess
 		if err != nil {
 			n.Logger.Error("Failed to accept incoming connection", "error", err)
 			continue
+		} else {
+			n.Logger.Info("Accepted incoming connection", "address", n.Addr)
 		}
 
 		go n.handle(c)
