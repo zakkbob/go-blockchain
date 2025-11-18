@@ -34,7 +34,7 @@ type Node struct {
 	Logger   *slog.Logger
 	handler  func(ReceivedMessage)
 	listener net.Listener
-	peers    []Peer
+	conns    []net.Conn
 }
 
 func (n *Node) ListenerAddr() net.Addr {

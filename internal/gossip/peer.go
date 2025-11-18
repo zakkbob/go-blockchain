@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -32,6 +33,10 @@ type Update struct {
 type ReceivedUpdate struct {
 	Type string          `json:"update_type"`
 	Data json.RawMessage `json:"data"`
+}
+
+func (r ReceivedUpdate) String() string {
+	return fmt.Sprintf("{Type: '%s', Data: '%s'}", r.Type, string(r.Data))
 }
 
 type Request struct {
@@ -75,6 +80,10 @@ func Dial(address string, updateHandler func(ReceivedUpdate) error, requestHandl
 		return nil, err
 	}
 
+	return peerFromConn(conn, updateHandler, requestHandler)
+}
+
+func peerFromConn(conn net.Conn, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) (*Peer, error) {
 	p := &Peer{
 		conn:           conn,
 		updateHandler:  updateHandler,
@@ -138,6 +147,16 @@ func (p *Peer) Request(ctx context.Context, requestType string, data any) (Recei
 		p.unregisterRequestID(id)
 		return ReceivedResponse{}, ctx.Err()
 	}
+}
+
+func (p *Peer) Disconnect() error {
+	if p.closeErr != nil {
+		return p.closeErr
+	}
+
+	p.fatalError(errors.New("Peer has been disconnected"))
+
+	return nil
 }
 
 // not proper yet
@@ -209,7 +228,9 @@ func (p *Peer) handle() {
 			return
 		} else if err != nil {
 			p.fatalError(err)
-			continue
+			return
+		} else if p.closeErr != nil {
+			return
 		}
 
 		switch m.MessageType {
