@@ -88,6 +88,10 @@ func Dial(address string, updateHandler func(ReceivedUpdate) error, requestHandl
 }
 
 func (p *Peer) Update(updateType string, data any) error {
+	if p.closeErr != nil {
+		return p.closeErr
+	}
+
 	return p.send(message{
 		MessageType: update,
 		Message: Update{
@@ -98,6 +102,10 @@ func (p *Peer) Update(updateType string, data any) error {
 }
 
 func (p *Peer) Request(ctx context.Context, requestType string, data any) (ReceivedResponse, error) {
+	if p.closeErr != nil {
+		return ReceivedResponse{}, p.closeErr
+	}
+
 	id := p.nextID()
 
 	m := message{
@@ -118,7 +126,13 @@ func (p *Peer) Request(ctx context.Context, requestType string, data any) (Recei
 	}
 
 	select {
-	case res := <-resChan:
+	case res, ok := <-resChan:
+		if !ok {
+			if p.closeErr != nil {
+				return ReceivedResponse{}, p.closeErr
+			}
+			panic("response channel closed unexpectedly")
+		}
 		return res, nil
 	case <-ctx.Done():
 		p.unregisterRequestID(id)
@@ -130,6 +144,16 @@ func (p *Peer) Request(ctx context.Context, requestType string, data any) (Recei
 func (p *Peer) fatalError(err error) {
 	p.conn.Close()
 	p.closeErr = err
+	p.clearResponseMap()
+}
+
+func (p *Peer) clearResponseMap() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for id, resChan := range p.responseMap {
+		close(resChan)
+		delete(p.responseMap, id)
+	}
 }
 
 func (p *Peer) registerRequestID(id int) chan ReceivedResponse {
