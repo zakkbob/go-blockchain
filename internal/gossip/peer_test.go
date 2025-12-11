@@ -1,17 +1,22 @@
 package gossip
 
 import (
+	"encoding/json"
 	"net"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func assertReceivedUpdateEqual(t *testing.T, got ReceivedUpdate, expected ReceivedUpdate) {
-	if got.Type != expected.Type || !slices.Equal(got.Data, expected.Data) {
-		t.Fatalf("Expected update %v, but got %v", expected, got)
+func receivedUpdateEquals(got ReceivedUpdate, expectedType string, expectedData any) bool {
+	j, err := json.Marshal(expectedData)
+	if err != nil {
+		panic("can't marshal data")
 	}
 
+	return got.Type == expectedType && slices.Equal(got.Data, j)
 }
 
 func logReceivedUpdate(t *testing.T) func(ReceivedUpdate) error {
@@ -67,12 +72,13 @@ func TestPeerUpdate(t *testing.T) {
 	}
 
 	peer2.Update("type", "data")
-	time.Sleep(time.Millisecond)
-	assertReceivedUpdateEqual(t, uSpy1.LastUpdate, ReceivedUpdate{
-		Type: "type",
-		Data: []byte("\"data\""),
-	})
+
+	assert.Eventually(t, func() bool {
+		return receivedUpdateEquals(uSpy1.LastUpdate, "type", "data")
+	}, time.Second, time.Millisecond, "Expected update was never received")
 
 	peer1.Disconnect()
 	peer2.Disconnect()
 }
+
+// test requests, maybe fix up the update test a bit better, cleaner
