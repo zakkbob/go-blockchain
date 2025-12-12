@@ -106,7 +106,7 @@ func TestPeerUpdate(t *testing.T) {
 
 	peer2.Update("type", "data")
 
-	require.Eventually(t, func() bool {
+	assert.Eventually(t, func() bool {
 		return receivedUpdateEquals(spy.LastUpdate, "type", "data")
 	}, time.Second, time.Millisecond, "Expected update was never received")
 
@@ -139,7 +139,7 @@ func TestPeerRequest(t *testing.T) {
 	})
 
 	wg.Go(func() {
-		require.Eventually(t, func() bool {
+		assert.Eventually(t, func() bool {
 			return receivedRequestEquals(spy.LastRequest, "type", "data")
 		}, time.Second, time.Millisecond, "Expected request was never received")
 	})
