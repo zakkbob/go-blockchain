@@ -51,6 +51,10 @@ type ReceivedRequest struct {
 	Data json.RawMessage `json:"data"`
 }
 
+func (r ReceivedRequest) String() string {
+	return fmt.Sprintf("{ID: %d, Type: '%s', Data: '%s'}", r.ID, r.Type, string(r.Data))
+}
+
 type Response struct {
 	RequestID int `json:"request_id"`
 	Data      any `json:"data"`
@@ -59,6 +63,10 @@ type Response struct {
 type ReceivedResponse struct {
 	RequestID int             `json:"request_id"`
 	Data      json.RawMessage `json:"data"`
+}
+
+func (r ReceivedResponse) String() string {
+	return fmt.Sprintf("{RequestID: %d, Data: '%s'}", r.RequestID, string(r.Data))
 }
 
 type Peer struct {
@@ -248,18 +256,18 @@ func (p *Peer) handle() {
 				p.fatalError(err)
 				continue
 			}
-			err = p.handleReceivedUpdate(u)
+			err := p.handleReceivedRequest(r)
 			if err != nil {
-				p.handleReceivedRequest(r)
+				p.fatalError(err)
 			}
 		case response:
 			if err := json.Unmarshal(m.Message, &res); err != nil {
 				p.fatalError(err)
 				continue
 			}
-			err = p.handleReceivedUpdate(u)
+			err = p.handleReceivedResponse(res)
 			if err != nil {
-				p.handleReceivedResponse(res)
+				p.fatalError(err)
 			}
 		}
 	}
