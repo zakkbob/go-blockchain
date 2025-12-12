@@ -11,6 +11,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"syscall"
 )
 
 var (
@@ -86,7 +87,17 @@ func (r ReceivedResponse) String() string {
 	return fmt.Sprintf("{RequestID: %d, Data: '%s'}", r.RequestID, string(r.Data))
 }
 
+type status bool
+
+const (
+	Connected    = true
+	Disconnected = false
+)
+
 type Peer struct {
+	Status     status
+	RemoteAddr string
+
 	conn   net.Conn
 	lastID atomic.Int64
 
@@ -110,6 +121,8 @@ func Dial(address string, updateHandler func(ReceivedUpdate) error, requestHandl
 
 func PeerFromConn(conn net.Conn, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) (*Peer, error) {
 	p := &Peer{
+		Status:         Connected,
+		RemoteAddr:     conn.RemoteAddr().String(),
 		conn:           conn,
 		updateHandler:  updateHandler,
 		requestHandler: requestHandler,
@@ -189,6 +202,7 @@ func (p *Peer) fatalError(err error) {
 	p.conn.Close()
 	p.closeErr = err
 	p.clearResponseMap()
+	p.Status = Disconnected
 }
 
 func (p *Peer) clearResponseMap() {
@@ -227,6 +241,10 @@ func (p *Peer) send(m message) error {
 
 	_, err = p.conn.Write(b)
 	if err != nil {
+		if errors.Is(err, syscall.EPIPE) { // Connection was closed from remote side
+			p.Disconnect()
+			return ErrPeerDisconnected
+		}
 		return err
 	}
 
@@ -249,7 +267,8 @@ func (p *Peer) handle() {
 		}{}
 
 		err := d.Decode(&m)
-		if errors.Is(err, io.EOF) {
+		if errors.Is(err, io.EOF) { // Connection closed from remote side
+			p.Disconnect()
 			return
 		} else if err != nil {
 			p.fatalError(err)
@@ -267,24 +286,27 @@ func (p *Peer) handle() {
 			err = p.handleReceivedUpdate(u)
 			if err != nil {
 				p.fatalError(err)
+				return
 			}
 		case request:
 			if err := json.Unmarshal(m.Message, &r); err != nil {
 				p.fatalError(err)
-				continue
+				return
 			}
 			err := p.handleReceivedRequest(r)
 			if err != nil {
 				p.fatalError(err)
+				return
 			}
 		case response:
 			if err := json.Unmarshal(m.Message, &res); err != nil {
 				p.fatalError(err)
-				continue
+				return
 			}
 			err = p.handleReceivedResponse(res)
 			if err != nil {
 				p.fatalError(err)
+				return
 			}
 		}
 	}

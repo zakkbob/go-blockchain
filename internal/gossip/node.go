@@ -4,7 +4,10 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"sync"
 )
+
+const maxPeers = 10
 
 type Message struct {
 	Type string `json:"message_type"`
@@ -19,6 +22,7 @@ type Node struct {
 	requestHandler  func(ReceivedRequest) (response any, err error)
 	listener        net.Listener
 	peers           []*Peer
+	mu              sync.RWMutex
 }
 
 func NewNode(addr string, logger *slog.Logger) *Node {
@@ -47,30 +51,67 @@ func (n *Node) BootstrapAndListen(knownPeers []string, updateHandler func(Receiv
 		if err != nil {
 			n.logger.Error("Failed to accept incoming connection", "error", err)
 			continue
-		} else {
-			n.logger.Info("Accepted incoming connection", "address", n.addr)
 		}
+
+		n.mu.RLock()
+		nPeers := len(n.peers)
+		n.mu.RUnlock()
+
+		if nPeers >= maxPeers {
+			n.logger.Info("Rejected incoming connection, already at max peers", "address", n.addr)
+			c.Close()
+			continue
+		}
+
+		n.logger.Info("Accepted incoming connection", "address", n.addr)
 
 		p, err := PeerFromConn(c, n.handleUpdate, n.handleRequest)
 		if err != nil {
 			n.logger.Error("Failed to handle new successful connection", "error", err)
 		}
+
+		n.mu.Lock()
 		n.peers = append(n.peers, p)
+		n.mu.Unlock()
 	}
 }
 
 func (n *Node) BroadcastUpdate(updateType string, data any) error {
 	var errs []error
+	var disconnectedPeers = false
 
+	n.mu.RLock()
 	for _, p := range n.peers {
+		if p.Status == Disconnected {
+			disconnectedPeers = true
+			continue
+		}
+
 		err := p.Update(updateType, data)
 		if err != nil {
 			if errors.Is(err, ErrPeerDisconnected) {
-				// FIXME:
+				disconnectedPeers = true
+				continue
 			} else {
 				errs = append(errs, err)
 			}
 		}
+	}
+	n.mu.RUnlock()
+
+	if disconnectedPeers {
+		n.mu.Lock()
+		i := 0
+		for _, p := range n.peers {
+			if p.Status == Connected {
+				n.peers[i] = p
+				i++
+			} else {
+				n.logger.Debug("Removed disconnected peer from list", "RemoteAddr", p.RemoteAddr)
+			}
+		}
+		n.peers = n.peers[:i]
+		n.mu.Unlock()
 	}
 
 	if len(errs) > 0 {
@@ -85,6 +126,9 @@ func (n *Node) ListenerAddr() net.Addr {
 }
 
 func (n *Node) connectTo(addrs []string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	var errs []error
 
 	for _, addr := range addrs {

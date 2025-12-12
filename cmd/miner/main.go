@@ -38,18 +38,27 @@ func (p *peersFlag) Set(value string) error {
 	return nil
 }
 
+var debugFlag bool
 var port int
 var difficulty int
 var peers peersFlag
 
 func main() {
+	flag.BoolVar(&debugFlag, "debug", false, "Show debug info")
 	flag.IntVar(&port, "port", 4000, "API server port")
 	flag.IntVar(&difficulty, "difficulty", 10, "Mining difficulty")
 	flag.Var(&peers, "peer", "Peers (can be used multiple times)")
 
 	flag.Parse()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	level := slog.LevelInfo
+	if debugFlag {
+		level = slog.LevelDebug
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+	}))
 
 	ledger, err := blockchain.NewLedger(difficulty)
 	if err != nil {
