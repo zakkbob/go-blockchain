@@ -54,84 +54,104 @@ func expectNoRequest(t *testing.T) func(ReceivedRequest) (any, error) {
 	}
 }
 
-func logReceivedUpdate(t *testing.T) func(ReceivedUpdate) error {
-	return func(u ReceivedUpdate) error {
-		t.Log("Received Update - Type:", u.Type, "Data:", string(u.Data))
-		return nil
+type updateRecorder struct {
+	updates []ReceivedUpdate
+	mu      sync.Mutex
+}
+
+func (s *updateRecorder) NextUpdate() (ReceivedUpdate, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.updates) == 0 {
+		return ReceivedUpdate{}, false
 	}
+
+	u := s.updates[0]
+	s.updates = s.updates[1:]
+	return u, true
 }
 
-func logReceivedRequest(t *testing.T) func(ReceivedRequest) (any, error) {
-	return func(r ReceivedRequest) (any, error) {
-		t.Log("Received Request - Type:", r.Type, "Data:", string(r.Data))
-		return nil, nil
-	}
-
-}
-
-type updateSpy struct { // bad name :/
-	T          *testing.T
-	LastUpdate ReceivedUpdate
-}
-
-func (s *updateSpy) HandleUpdate(u ReceivedUpdate) error {
-	s.T.Log("Received Update - Type:", u.Type, "Data:", string(u.Data))
-	s.LastUpdate = u
-
+func (s *updateRecorder) RecordUpdate(u ReceivedUpdate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.updates = append(s.updates, u)
 	return nil
 }
 
-type requestSpy struct { // bad name :/
-	T           *testing.T
-	LastRequest ReceivedRequest
-	Response    any
+type requestRecorder struct {
+	Response any
+	requests []ReceivedRequest
+	mu       sync.Mutex
 }
 
-func (s *requestSpy) ReceiveRequest(r ReceivedRequest) (any, error) {
-	s.T.Logf("Received Request - %v", r)
-	s.LastRequest = r
+func (r *requestRecorder) NextRequest() (ReceivedRequest, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.requests) == 0 {
+		return ReceivedRequest{}, false
+	}
+
+	u := r.requests[0]
+	r.requests = r.requests[1:]
+	return u, true
+}
+
+func (s *requestRecorder) RecordRequest(r ReceivedRequest) (any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests = append(s.requests, r)
 	return s.Response, nil
 }
 
 func TestPeerUpdate(t *testing.T) {
 	conn1, conn2 := net.Pipe()
 
-	spy := updateSpy{T: t}
+	recorder := updateRecorder{}
 
-	peer1, err := peerFromConn(conn1, spy.HandleUpdate, expectNoRequest(t))
+	sender, err := peerFromConn(conn1, expectNoUpdate(t), expectNoRequest(t))
 	require.NoError(t, err)
 
-	peer2, err := peerFromConn(conn2, expectNoUpdate(t), expectNoRequest(t))
+	receiver, err := peerFromConn(conn2, recorder.RecordUpdate, expectNoRequest(t))
 	require.NoError(t, err)
 
-	peer2.Update("type", "data")
-
+	sender.Update("type", "data")
 	assert.Eventually(t, func() bool {
-		return receivedUpdateEquals(spy.LastUpdate, "type", "data")
+		u, ok := recorder.NextUpdate()
+		if !ok {
+			return false
+		}
+
+		if !receivedUpdateEquals(u, "type", "data") {
+			t.Errorf("Received unexpected update - %v", u)
+			return false
+		}
+
+		return true
 	}, time.Second, time.Millisecond, "Expected update was never received")
 
-	peer1.Disconnect()
-	peer2.Disconnect()
+	sender.Disconnect()
+	receiver.Disconnect()
 }
 
 func TestPeerRequest(t *testing.T) {
 	conn1, conn2 := net.Pipe()
 
-	spy := requestSpy{
-		T:        t,
+	recorder := requestRecorder{
 		Response: "response",
 	}
 
-	peer1, err := peerFromConn(conn1, expectNoUpdate(t), spy.ReceiveRequest)
+	sender, err := peerFromConn(conn2, expectNoUpdate(t), expectNoRequest(t))
 	require.NoError(t, err)
 
-	peer2, err := peerFromConn(conn2, expectNoUpdate(t), expectNoRequest(t))
+	receiver, err := peerFromConn(conn1, expectNoUpdate(t), recorder.RecordRequest)
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
 
 	wg.Go(func() {
-		res, err := peer2.Request(context.Background(), "type", "data")
+		res, err := sender.Request(context.Background(), "type", "data")
 		require.NoError(t, err)
 
 		assert.Truef(t, receivedResponseEquals(res, "response"), "Received incorrect response - %v", res)
@@ -140,12 +160,22 @@ func TestPeerRequest(t *testing.T) {
 
 	wg.Go(func() {
 		assert.Eventually(t, func() bool {
-			return receivedRequestEquals(spy.LastRequest, "type", "data")
+			r, ok := recorder.NextRequest()
+			if !ok {
+				return false
+			}
+
+			if !receivedRequestEquals(r, "type", "data") {
+				t.Errorf("Received unexpected request - %v", r)
+				return false
+			}
+
+			return true
 		}, time.Second, time.Millisecond, "Expected request was never received")
 	})
 
 	wg.Wait()
 
-	peer1.Disconnect()
-	peer2.Disconnect()
+	sender.Disconnect()
+	receiver.Disconnect()
 }
