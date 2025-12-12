@@ -29,8 +29,5 @@ func CreateTestLogger(t *testing.T) *slog.Logger {
 
 func CreateTestNode(t *testing.T, h slog.Handler) *gossip.Node {
 	t.Helper()
-	return &gossip.Node{
-		Addr:   ":0",
-		Logger: slog.New(h),
-	}
+	return gossip.NewNode(":0", slog.New(h))
 }

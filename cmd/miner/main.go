@@ -18,14 +18,13 @@ type config struct {
 }
 
 type application struct {
-	config           config
-	address          blockchain.Address
-	miner            *miner.Miner
-	logger           *slog.Logger
-	ledger           *blockchain.Ledger
-	node             *gossip.Node
-	txpool           txpool.Pool
-	receivedMessages map[[32]byte]struct{}
+	config  config
+	address blockchain.Address
+	miner   *miner.Miner
+	logger  *slog.Logger
+	ledger  *blockchain.Ledger
+	node    *gossip.Node
+	txpool  txpool.Pool
 }
 
 type peersFlag []string
@@ -58,10 +57,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	node := &gossip.Node{
-		Addr:   fmt.Sprintf(":%d", port),
-		Logger: logger,
-	}
+	node := gossip.NewNode(fmt.Sprintf(":%d", port), logger)
 
 	address, err := blockchain.GenerateAddress(rand.Reader)
 	if err != nil {
@@ -74,20 +70,19 @@ func main() {
 		config: config{
 			debug: true,
 		},
-		address:          address,
-		logger:           logger,
-		ledger:           ledger,
-		miner:            miner,
-		node:             node,
-		txpool:           txpool.Pool{},
-		receivedMessages: map[[32]byte]struct{}{},
+		address: address,
+		logger:  logger,
+		ledger:  ledger,
+		miner:   miner,
+		node:    node,
+		txpool:  txpool.Pool{},
 	}
 
 	go app.processMinedBlocks()
 
 	logger.Info("starting server", "port", port, "hash", ledger.Head().Hash())
 
-	err = node.BootstrapAndListen(peers, app.handler)
+	err = node.BootstrapAndListen(peers, app.handleUpdate, app.handleRequest)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)

@@ -3,6 +3,7 @@ package gossip
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,16 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+)
+
+var (
+	ErrUnknownUpdate      = errors.New("Unkown update type")
+	ErrBadUpdate          = errors.New("Update data cannot be parsed")
+	ErrUpdateRejected     = errors.New("Update was rejected")
+	ErrUnknownRequest     = errors.New("Unkown request type")
+	ErrBadRequest         = errors.New("Request data cannot be parsed")
+	ErrPeerDisconnected   = errors.New("Peer has been disconnected")
+	ErrUnexpectedResponse = errors.New("Received response does not match a request")
 )
 
 type messageType int
@@ -33,6 +44,12 @@ type Update struct {
 type ReceivedUpdate struct {
 	Type string          `json:"update_type"`
 	Data json.RawMessage `json:"data"`
+}
+
+func (r ReceivedUpdate) Hash() [32]byte {
+	b := []byte(r.Type)
+	b = append(b, r.Data...)
+	return sha256.Sum256(b)
 }
 
 func (r ReceivedUpdate) String() string {
@@ -88,10 +105,10 @@ func Dial(address string, updateHandler func(ReceivedUpdate) error, requestHandl
 		return nil, err
 	}
 
-	return peerFromConn(conn, updateHandler, requestHandler)
+	return PeerFromConn(conn, updateHandler, requestHandler)
 }
 
-func peerFromConn(conn net.Conn, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) (*Peer, error) {
+func PeerFromConn(conn net.Conn, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) (*Peer, error) {
 	p := &Peer{
 		conn:           conn,
 		updateHandler:  updateHandler,
@@ -162,7 +179,7 @@ func (p *Peer) Disconnect() error {
 		return p.closeErr
 	}
 
-	p.fatalError(errors.New("Peer has been disconnected"))
+	p.fatalError(ErrPeerDisconnected)
 
 	return nil
 }
@@ -309,7 +326,7 @@ func (p *Peer) handleReceivedResponse(u ReceivedResponse) error {
 	resChan, ok := p.responseMap[u.RequestID]
 	p.mu.RUnlock()
 	if !ok {
-		return errors.New("Received response does not match a request")
+		return ErrUnexpectedResponse
 	}
 
 	resChan <- u

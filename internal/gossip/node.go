@@ -1,28 +1,10 @@
 package gossip
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net"
 )
-
-type ReceivedMessage struct {
-	Type       string
-	RemoteAddr string
-	Data       json.RawMessage
-}
-
-func (m *ReceivedMessage) Hash() [32]byte {
-	b := make([]byte, 0, len(m.Type)+len(m.RemoteAddr)+len(m.Data))
-	b = append(b, []byte(m.Type)...)
-	b = append(b, []byte(m.RemoteAddr)...)
-	b = append(b, []byte(m.Data)...)
-	return sha256.Sum256(b)
-}
 
 type Message struct {
 	Type string `json:"message_type"`
@@ -30,29 +12,65 @@ type Message struct {
 }
 
 type Node struct {
-	Addr     string
-	Logger   *slog.Logger
-	handler  func(ReceivedMessage)
-	listener net.Listener
-	conns    []net.Conn
+	addr            string
+	logger          *slog.Logger
+	receivedUpdates map[[32]byte]struct{}
+	updateHandler   func(ReceivedUpdate) error
+	requestHandler  func(ReceivedRequest) (response any, err error)
+	listener        net.Listener
+	peers           []*Peer
 }
 
-func (n *Node) ListenerAddr() net.Addr {
-	return n.listener.Addr()
+func NewNode(addr string, logger *slog.Logger) *Node {
+	return &Node{
+		addr:            addr,
+		logger:          logger,
+		receivedUpdates: map[[32]byte]struct{}{},
+	}
 }
 
-func (n *Node) connectTo(peers []string) error {
-	var errs []error
+func (n *Node) BootstrapAndListen(knownPeers []string, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) error {
+	n.updateHandler = updateHandler
+	n.requestHandler = requestHandler
 
-	for _, peer := range peers {
-		conn, err := net.Dial("tcp", peer)
+	n.connectTo(knownPeers)
+
+	var err error
+
+	n.listener, err = net.Listen("tcp", n.addr)
+	if err != nil {
+		return err
+	}
+
+	for {
+		c, err := n.listener.Accept()
 		if err != nil {
-			n.Logger.Error("Failed to connect to peer", "peer", peer, "error", err)
-			errs = append(errs, err)
+			n.logger.Error("Failed to accept incoming connection", "error", err)
 			continue
+		} else {
+			n.logger.Info("Accepted incoming connection", "address", n.addr)
 		}
 
-		go n.handle(conn)
+		p, err := PeerFromConn(c, n.handleUpdate, n.handleRequest)
+		if err != nil {
+			n.logger.Error("Failed to handle new successful connection", "error", err)
+		}
+		n.peers = append(n.peers, p)
+	}
+}
+
+func (n *Node) BroadcastUpdate(updateType string, data any) error {
+	var errs []error
+
+	for _, p := range n.peers {
+		err := p.Update(updateType, data)
+		if err != nil {
+			if errors.Is(err, ErrPeerDisconnected) {
+				// FIXME:
+			} else {
+				errs = append(errs, err)
+			}
+		}
 	}
 
 	if len(errs) > 0 {
@@ -62,73 +80,47 @@ func (n *Node) connectTo(peers []string) error {
 	return nil
 }
 
-func (n *Node) Broadcast(m Message) error {
-	b, err := json.Marshal(m)
-	if err != nil {
-		return err
+func (n *Node) ListenerAddr() net.Addr {
+	return n.listener.Addr()
+}
+
+func (n *Node) connectTo(addrs []string) error {
+	var errs []error
+
+	for _, addr := range addrs {
+		peer, err := Dial(addr, n.handleUpdate, n.handleRequest)
+		if err != nil {
+			n.logger.Error("Failed to connect to peer", "peer", addr, "error", err)
+			errs = append(errs, err)
+			continue
+		}
+		n.peers = append(n.peers, peer)
 	}
 
-	for _, c := range n.conns {
-		_, err = c.Write(b)
-	}
-	if err != nil {
-		return err
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 
 	return nil
 }
 
-func (n *Node) BootstrapAndListen(knownPeers []string, handler func(ReceivedMessage)) error {
-	n.handler = handler
+func (n *Node) handleUpdate(u ReceivedUpdate) error {
+	h := u.Hash()
+	if _, ok := n.receivedUpdates[h]; ok {
+		return nil
+	}
 
-	n.connectTo(knownPeers)
+	n.receivedUpdates[h] = struct{}{}
 
-	var err error
-
-	n.listener, err = net.Listen("tcp", n.Addr)
+	err := n.updateHandler(u)
 	if err != nil {
 		return err
 	}
 
-	for {
-		c, err := n.listener.Accept()
-		if err != nil {
-			n.Logger.Error("Failed to accept incoming connection", "error", err)
-			continue
-		} else {
-			n.Logger.Info("Accepted incoming connection", "address", n.Addr)
-		}
-
-		go n.handle(c)
-	}
+	n.BroadcastUpdate(u.Type, u.Data)
+	return nil
 }
 
-func (n *Node) handle(c net.Conn) {
-	n.conns = append(n.conns, c)
-
-	raw := &bytes.Buffer{}
-	d := json.NewDecoder(io.TeeReader(c, raw))
-
-	for {
-		m := struct {
-			Type string          `json:"message_type"`
-			Data json.RawMessage `json:"data"`
-		}{}
-
-		err := d.Decode(&m)
-		if errors.Is(err, io.EOF) {
-			return
-		} else if err != nil {
-			n.Logger.Error("Failed to decode received message", "message", raw.String(), "peer", c.RemoteAddr().String(), "error", err)
-			continue
-		}
-
-		r := ReceivedMessage{
-			Type:       m.Type,
-			Data:       m.Data,
-			RemoteAddr: c.RemoteAddr().String(),
-		}
-
-		n.handler(r)
-	}
+func (n *Node) handleRequest(r ReceivedRequest) (any, error) {
+	return n.requestHandler(r)
 }

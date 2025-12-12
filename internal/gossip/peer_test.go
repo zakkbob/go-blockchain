@@ -1,4 +1,4 @@
-package gossip
+package gossip_test
 
 import (
 	"context"
@@ -11,9 +11,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zakkbob/go-blockchain/internal/gossip"
 )
 
-func receivedUpdateEquals(got ReceivedUpdate, expectedType string, expectedData any) bool {
+func receivedUpdateEquals(got gossip.ReceivedUpdate, expectedType string, expectedData any) bool {
 	j, err := json.Marshal(expectedData)
 	if err != nil {
 		panic("can't marshal data")
@@ -22,7 +23,7 @@ func receivedUpdateEquals(got ReceivedUpdate, expectedType string, expectedData 
 	return got.Type == expectedType && slices.Equal(got.Data, j)
 }
 
-func receivedRequestEquals(got ReceivedRequest, expectedType string, expectedData any) bool {
+func receivedRequestEquals(got gossip.ReceivedRequest, expectedType string, expectedData any) bool {
 	j, err := json.Marshal(expectedData)
 	if err != nil {
 		panic("can't marshal data")
@@ -31,7 +32,7 @@ func receivedRequestEquals(got ReceivedRequest, expectedType string, expectedDat
 	return got.Type == expectedType && slices.Equal(got.Data, j)
 }
 
-func receivedResponseEquals(got ReceivedResponse, expectedData any) bool {
+func receivedResponseEquals(got gossip.ReceivedResponse, expectedData any) bool {
 	j, err := json.Marshal(expectedData)
 	if err != nil {
 		panic("can't marshal data")
@@ -40,31 +41,31 @@ func receivedResponseEquals(got ReceivedResponse, expectedData any) bool {
 	return slices.Equal(got.Data, j)
 }
 
-func expectNoUpdate(t *testing.T) func(ReceivedUpdate) error {
-	return func(u ReceivedUpdate) error {
+func expectNoUpdate(t *testing.T) func(gossip.ReceivedUpdate) error {
+	return func(u gossip.ReceivedUpdate) error {
 		t.Errorf("Received unexpected update - %v", u)
 		return nil
 	}
 }
 
-func expectNoRequest(t *testing.T) func(ReceivedRequest) (any, error) {
-	return func(r ReceivedRequest) (any, error) {
+func expectNoRequest(t *testing.T) func(gossip.ReceivedRequest) (any, error) {
+	return func(r gossip.ReceivedRequest) (any, error) {
 		t.Errorf("Received unexpected request - %v", r)
 		return nil, nil
 	}
 }
 
 type updateRecorder struct {
-	updates []ReceivedUpdate
+	updates []gossip.ReceivedUpdate
 	mu      sync.Mutex
 }
 
-func (s *updateRecorder) NextUpdate() (ReceivedUpdate, bool) {
+func (s *updateRecorder) NextUpdate() (gossip.ReceivedUpdate, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if len(s.updates) == 0 {
-		return ReceivedUpdate{}, false
+		return gossip.ReceivedUpdate{}, false
 	}
 
 	u := s.updates[0]
@@ -72,7 +73,7 @@ func (s *updateRecorder) NextUpdate() (ReceivedUpdate, bool) {
 	return u, true
 }
 
-func (s *updateRecorder) RecordUpdate(u ReceivedUpdate) error {
+func (s *updateRecorder) RecordUpdate(u gossip.ReceivedUpdate) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.updates = append(s.updates, u)
@@ -81,16 +82,16 @@ func (s *updateRecorder) RecordUpdate(u ReceivedUpdate) error {
 
 type requestRecorder struct {
 	Response any
-	requests []ReceivedRequest
+	requests []gossip.ReceivedRequest
 	mu       sync.Mutex
 }
 
-func (r *requestRecorder) NextRequest() (ReceivedRequest, bool) {
+func (r *requestRecorder) NextRequest() (gossip.ReceivedRequest, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if len(r.requests) == 0 {
-		return ReceivedRequest{}, false
+		return gossip.ReceivedRequest{}, false
 	}
 
 	u := r.requests[0]
@@ -98,7 +99,7 @@ func (r *requestRecorder) NextRequest() (ReceivedRequest, bool) {
 	return u, true
 }
 
-func (s *requestRecorder) RecordRequest(r ReceivedRequest) (any, error) {
+func (s *requestRecorder) RecordRequest(r gossip.ReceivedRequest) (any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.requests = append(s.requests, r)
@@ -110,13 +111,15 @@ func TestPeerUpdate(t *testing.T) {
 
 	recorder := updateRecorder{}
 
-	sender, err := peerFromConn(conn1, expectNoUpdate(t), expectNoRequest(t))
+	sender, err := gossip.PeerFromConn(conn1, expectNoUpdate(t), expectNoRequest(t))
 	require.NoError(t, err)
 
-	receiver, err := peerFromConn(conn2, recorder.RecordUpdate, expectNoRequest(t))
+	receiver, err := gossip.PeerFromConn(conn2, recorder.RecordUpdate, expectNoRequest(t))
 	require.NoError(t, err)
 
-	sender.Update("type", "data")
+	err = sender.Update("type", "data")
+	require.NoError(t, err)
+
 	assert.Eventually(t, func() bool {
 		u, ok := recorder.NextUpdate()
 		if !ok {
@@ -142,10 +145,10 @@ func TestPeerRequest(t *testing.T) {
 		Response: "response",
 	}
 
-	sender, err := peerFromConn(conn2, expectNoUpdate(t), expectNoRequest(t))
+	sender, err := gossip.PeerFromConn(conn2, expectNoUpdate(t), expectNoRequest(t))
 	require.NoError(t, err)
 
-	receiver, err := peerFromConn(conn1, expectNoUpdate(t), recorder.RecordRequest)
+	receiver, err := gossip.PeerFromConn(conn1, expectNoUpdate(t), recorder.RecordRequest)
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup

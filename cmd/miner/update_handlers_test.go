@@ -47,8 +47,8 @@ func TestNewTransactionHandler(t *testing.T) {
 				txpool: txpool.Pool{},
 			}
 
-			msg := gossip.CreateReceivedMessage(t, msgNewTransaction, "test :D", tt.tx)
-			app.newTransactionHandler(msg)
+			msg := gossip.NewReceivedUpdate(t, newTransactionUpdate, tt.tx)
+			app.handleNewTransaction(msg)
 
 			if app.txpool.Size() != tt.expectedSize {
 				t.Fatalf("Transaction pool size should be %d", tt.expectedSize)
@@ -78,11 +78,11 @@ func TestNewBlockHandler(t *testing.T) {
 	block2 := blockchain.NewBlock(block.Hash(), []blockchain.Transaction{tx}, 3, addr2.PublicKey())
 	block2.Mine()
 
-	msg1 := gossip.CreateReceivedMessage(t, msgNewBlock, "test :D", block)
-	msg2 := gossip.CreateReceivedMessage(t, msgNewBlock, "test :D", block2)
+	msg1 := gossip.NewReceivedUpdate(t, newBlockUpdate, block)
+	msg2 := gossip.NewReceivedUpdate(t, newBlockUpdate, block2)
 
-	app.newBlockHandler(msg1)
-	app.newBlockHandler(msg2)
+	app.handleNewBlock(msg1)
+	app.handleNewBlock(msg2)
 
 	if ledger.Length() != 3 {
 		t.Fatal("Ermm, blocks should've been added!")

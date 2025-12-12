@@ -2,51 +2,61 @@ package gossip_test
 
 import (
 	"log/slog"
-	"net"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/zakkbob/go-blockchain/internal/gossip"
 )
 
-type testHandler struct {
-	message gossip.ReceivedMessage
-}
-
-func (t *testHandler) handle(message gossip.ReceivedMessage) {
-	t.message = message
-}
-
 func TestBootstrap(t *testing.T) {
-	handler := testHandler{}
+	recorder1 := updateRecorder{}
+	recorder2 := updateRecorder{}
 
-	n := gossip.Node{
-		Addr:   ":0",
-		Logger: slog.New(slog.DiscardHandler),
-	}
+	n := gossip.NewNode(":0", slog.New(slog.DiscardHandler))
 
 	go func() {
-		err := n.BootstrapAndListen([]string{}, handler.handle)
-		if err != nil {
-			t.Fatal(err)
-		}
+		err := n.BootstrapAndListen([]string{}, recorder1.RecordUpdate, expectNoRequest(t))
+		require.NoError(t, err)
 	}()
 
 	time.Sleep(time.Millisecond)
 	t.Log(n.ListenerAddr())
 
-	conn, err := net.Dial("tcp", n.ListenerAddr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
+	peer, err := gossip.Dial(n.ListenerAddr().String(), recorder2.RecordUpdate, expectNoRequest(t))
+	require.NoError(t, err)
 
-	conn.Write([]byte(`{"message_type":"steve","data":""}`))
+	err = peer.Update("type", "data")
+	require.NoError(t, err)
 
-	time.Sleep(time.Millisecond)
+	assert.Eventually(t, func() bool {
+		u, ok := recorder1.NextUpdate()
+		if !ok {
+			return false
+		}
 
-	if handler.message.Type != "steve" {
-		t.Errorf("I need steve")
-	}
+		if !receivedUpdateEquals(u, "type", "data") {
+			t.Errorf("Received unexpected update - %v", u)
+			return false
+		}
 
-	conn.Close()
+		return true
+	}, time.Second, time.Millisecond, "Never received expected update")
+
+	assert.Eventually(t, func() bool {
+		u, ok := recorder2.NextUpdate()
+		if !ok {
+			return false
+		}
+
+		if !receivedUpdateEquals(u, "type", "data") {
+			t.Errorf("Received unexpected update - %v", u)
+			return false
+		}
+
+		return true
+	}, time.Second, time.Millisecond, "Never received expected update (through gossiping)")
+
+	peer.Disconnect()
 }

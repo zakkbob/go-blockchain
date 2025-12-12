@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/zakkbob/go-blockchain/internal/blockchain"
-	"github.com/zakkbob/go-blockchain/internal/gossip"
 )
 
 func (app *application) updateMiningTarget() {
@@ -49,10 +48,7 @@ func (app *application) processMinedBlocks() {
 			continue
 		}
 
-		app.node.Broadcast(gossip.Message{
-			Type: msgNewBlock,
-			Data: b,
-		})
+		app.node.BroadcastUpdate(newBlockUpdate, b)
 
 		app.logger.Info("Mined and broadcasted a new block!")
 	}

@@ -5,16 +5,15 @@ import (
 	"testing"
 )
 
-func CreateReceivedMessage(t *testing.T, messageType string, remoteAddr string, data any) ReceivedMessage {
+func NewReceivedUpdate(t *testing.T, updateType string,data any) ReceivedUpdate {
 	b, err := json.Marshal(data)
 	if err != nil {
-		t.Fatal("Failed to create received message")
-		return ReceivedMessage{}
+		t.Fatal("Failed to create dummy received update")
+		return ReceivedUpdate{}
 	}
 
-	return ReceivedMessage{
-		Type:       messageType,
-		RemoteAddr: remoteAddr,
+	return ReceivedUpdate{
+		Type:       updateType,
 		Data:       json.RawMessage(b),
 	}
 }
