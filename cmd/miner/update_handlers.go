@@ -25,7 +25,7 @@ func (app *application) handleUpdate(u gossip.ReceivedUpdate) error {
 		if errors.Is(err, gossip.ErrBadUpdate) || errors.Is(err, gossip.ErrUpdateRejected) {
 			return err
 		}
-		app.serverError(err)
+		app.logError("Failed to process update", err)
 		return gossip.ErrUpdateRejected
 	}
 
@@ -37,6 +37,7 @@ func (app *application) handleNewTransaction(u gossip.ReceivedUpdate) error {
 
 	err := json.Unmarshal(u.Data, &tx)
 	if err != nil {
+		app.logger.Info("Incoming transaction could not be parsed", "error", err)
 		return gossip.ErrBadUpdate
 	}
 
@@ -55,6 +56,7 @@ func (app *application) handleNewBlock(u gossip.ReceivedUpdate) error {
 
 	err := json.Unmarshal(u.Data, &b)
 	if err != nil {
+		app.logger.Info("Incoming block could not be parsed", "error", err)
 		return gossip.ErrBadUpdate
 	}
 

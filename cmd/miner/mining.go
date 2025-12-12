@@ -48,7 +48,11 @@ func (app *application) processMinedBlocks() {
 			continue
 		}
 
-		app.node.BroadcastUpdate(newBlockUpdate, b)
+		err := app.node.BroadcastUpdate(newBlockUpdate, b)
+		if err != nil {
+			app.logError("Failed to broadcast new block", err)
+			continue
+		}
 
 		app.logger.Info("Mined and broadcasted a new block!")
 	}

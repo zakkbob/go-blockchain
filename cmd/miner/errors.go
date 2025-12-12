@@ -4,14 +4,10 @@ import (
 	"runtime/debug"
 )
 
-func (app *application) logError(err error) {
+func (app *application) logError(msg string, err error) {
 	var (
 		trace = string(debug.Stack())
 	)
 
-	app.logger.Error(err.Error(), "trace", trace)
-}
-
-func (app *application) serverError(err error) {
-	app.logError(err)
+	app.logger.Error(msg, "error", err, "trace", trace)
 }

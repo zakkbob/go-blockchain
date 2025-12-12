@@ -107,13 +107,14 @@ func (n *Node) connectTo(addrs []string) error {
 func (n *Node) handleUpdate(u ReceivedUpdate) error {
 	h := u.Hash()
 	if _, ok := n.receivedUpdates[h]; ok {
+		n.logger.Debug("Ignored already received update", "update", u)
 		return nil
 	}
 
 	n.receivedUpdates[h] = struct{}{}
 
 	err := n.updateHandler(u)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrUpdateRejected) {
 		return err
 	}
 
