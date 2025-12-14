@@ -15,13 +15,13 @@ import (
 )
 
 var (
-	ErrUnknownUpdate      = errors.New("Unkown update type")
-	ErrBadUpdate          = errors.New("Update data cannot be parsed")
-	ErrUpdateRejected     = errors.New("Update was rejected")
-	ErrUnknownRequest     = errors.New("Unkown request type")
-	ErrBadRequest         = errors.New("Request data cannot be parsed")
-	ErrPeerDisconnected   = errors.New("Peer has been disconnected")
-	ErrUnexpectedResponse = errors.New("Received response does not match a request")
+	ErrUnknownUpdate      = errors.New("unkown update type")
+	ErrBadUpdate          = errors.New("update data cannot be parsed")
+	ErrUpdateRejected     = errors.New("update was rejected")
+	ErrUnknownRequest     = errors.New("unkown request type")
+	ErrBadRequest         = errors.New("request data cannot be parsed")
+	ErrPeerDisconnected   = errors.New("peer has been disconnected")
+	ErrUnexpectedResponse = errors.New("received response does not match a request")
 )
 
 type messageType int
