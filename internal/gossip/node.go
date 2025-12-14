@@ -9,11 +9,6 @@ import (
 
 const maxPeers = 10
 
-type Message struct {
-	Type string `json:"message_type"`
-	Data any    `json:"data"`
-}
-
 type Node struct {
 	addr            string
 	logger          *slog.Logger
@@ -63,7 +58,7 @@ func (n *Node) BootstrapAndListen(knownPeers []string, updateHandler func(Receiv
 			continue
 		}
 
-		n.logger.Info("Accepted incoming connection", "address", n.addr)
+		n.logger.Info("Accepted incoming connection", "RemoteAddr", c.RemoteAddr().String())
 
 		p, err := PeerFromConn(c, n.handleUpdate, n.handleRequest)
 		if err != nil {
