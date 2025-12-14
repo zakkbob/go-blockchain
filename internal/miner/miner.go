@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
 	"math"
 	"sync"
 
@@ -42,7 +41,6 @@ func NewMiner(pubkey ed25519.PublicKey) *Miner {
 // Starts mining a block, using one worker
 // Can be called while already mining
 func (m *Miner) Mine(b blockchain.Block) {
-	fmt.Println("Starting new mining work")
 	m.Stop()
 
 	b = b.Clone()

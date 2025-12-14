@@ -1,10 +1,15 @@
 package gossip
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net"
 	"sync"
+)
+
+var (
+	ErrNoPeers = errors.New("node has no peers")
 )
 
 const maxPeers = 10
@@ -20,20 +25,21 @@ type Node struct {
 	mu              sync.RWMutex
 }
 
-func NewNode(addr string, logger *slog.Logger) *Node {
+func NewNode(addr string, logger *slog.Logger, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) *Node {
 	return &Node{
 		addr:            addr,
 		logger:          logger,
 		receivedUpdates: map[[32]byte]struct{}{},
+		updateHandler:   updateHandler,
+		requestHandler:  requestHandler,
 	}
 }
 
-func (n *Node) BootstrapAndListen(knownPeers []string, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) error {
-	n.updateHandler = updateHandler
-	n.requestHandler = requestHandler
+func (n *Node) Connect(peers []string) error {
+	return n.connectTo(peers)
+}
 
-	n.connectTo(knownPeers)
-
+func (n *Node) Listen() error {
 	var err error
 
 	n.listener, err = net.Listen("tcp", n.addr)
@@ -114,6 +120,22 @@ func (n *Node) BroadcastUpdate(updateType string, data any) error {
 	}
 
 	return nil
+}
+
+func (n *Node) Request(ctx context.Context, requestType string, data any) (ReceivedResponse, error) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	if len(n.peers) == 0 {
+		return ReceivedResponse{}, ErrNoPeers
+	}
+
+	res, err := n.peers[0].Request(ctx, requestType, data)
+	if err != nil {
+		return ReceivedResponse{}, err
+	}
+
+	return res, nil
 }
 
 func (n *Node) ListenerAddr() net.Addr {

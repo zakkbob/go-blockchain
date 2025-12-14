@@ -14,10 +14,10 @@ func TestBootstrap(t *testing.T) {
 	recorder1 := updateRecorder{}
 	recorder2 := updateRecorder{}
 
-	n := gossip.NewNode(":0", slog.New(slog.DiscardHandler))
+	n := gossip.NewNode(":0", slog.New(slog.DiscardHandler), recorder1.RecordUpdate, expectNoRequest(t))
 
 	go func() {
-		err := n.BootstrapAndListen([]string{}, recorder1.RecordUpdate, expectNoRequest(t))
+		err := n.Listen()
 		require.NoError(t, err)
 	}()
 

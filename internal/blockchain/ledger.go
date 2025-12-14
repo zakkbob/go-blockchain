@@ -101,26 +101,9 @@ type Ledger struct {
 }
 
 func NewLedger(difficulty int) (*Ledger, error) {
-	genesis := NewGenesisBlock(difficulty)
-	genesis.Mine()
-
-	balances := Balances{
-		balances: map[[32]byte]uint64{},
-	}
-
-	h := &head{
-		block:    &genesis,
-		length:   1,
-		balances: balances,
-	}
-
-	blocks := map[[32]byte]*Block{}
-	blocks[genesis.Hash()] = &genesis
-
 	c := Ledger{
-		blocks: blocks,
-		heads:  []*head{h},
-		head:   h,
+		blocks: map[[32]byte]*Block{},
+		heads:  []*head{},
 	}
 
 	return &c, nil
@@ -143,7 +126,16 @@ func (l *Ledger) Balances() Balances {
 func (l *Ledger) Length() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
+
+	if l.head == nil {
+		return 0
+	}
+
 	return l.head.length
+}
+
+func (l *Ledger) Chain() []*Block {
+	return l.getChain(l.HeadHash())
 }
 
 func (l *Ledger) getHead(hash [32]byte) (*head, bool) {
@@ -203,6 +195,25 @@ func (l *Ledger) AddBlock(b Block) error {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	if b.Genesis {
+		h := &head{
+			block:  &b,
+			length: 1,
+			balances: Balances{
+				balances: map[[32]byte]uint64{},
+			},
+		}
+
+		l.heads = append(l.heads, h)
+		l.blocks[b.Hash()] = &b
+
+		if l.head == nil {
+			l.head = h
+		}
+
+		return nil
+	}
 
 	if _, ok := l.blocks[b.PrevBlock]; !ok {
 		return ErrPrevBlockNotFound{hash: b.PrevBlock}

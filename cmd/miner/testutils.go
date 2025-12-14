@@ -3,8 +3,6 @@ package main
 import (
 	"log/slog"
 	"testing"
-
-	"github.com/zakkbob/go-blockchain/internal/gossip"
 )
 
 type testLogger struct {
@@ -25,9 +23,4 @@ func CreateTestConfig(t *testing.T) config {
 func CreateTestLogger(t *testing.T) *slog.Logger {
 	t.Helper()
 	return slog.New(slog.NewTextHandler(testLogger{t}, nil))
-}
-
-func CreateTestNode(t *testing.T, h slog.Handler) *gossip.Node {
-	t.Helper()
-	return gossip.NewNode(":0", slog.New(h))
 }

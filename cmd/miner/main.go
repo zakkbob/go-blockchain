@@ -66,13 +66,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	node := gossip.NewNode(fmt.Sprintf(":%d", port), logger)
-
 	address, err := blockchain.GenerateAddress(rand.Reader)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
+
 	miner := miner.NewMiner(address.PublicKey())
 
 	app := application{
@@ -83,17 +82,14 @@ func main() {
 		logger:  logger,
 		ledger:  ledger,
 		miner:   miner,
-		node:    node,
 		txpool:  txpool.Pool{},
 	}
 
-	go app.processMinedBlocks()
+	app.node = gossip.NewNode(fmt.Sprintf(":%d", port), logger, app.handleUpdate, app.handleRequest)
 
-	logger.Info("starting server", "port", port, "hash", ledger.Head().Hash())
-
-	err = node.BootstrapAndListen(peers, app.handleUpdate, app.handleRequest)
+	err = app.run(peers, difficulty)
 	if err != nil {
-		logger.Error(err.Error())
+		app.logger.Error(err.Error())
 		os.Exit(1)
 	}
 }
