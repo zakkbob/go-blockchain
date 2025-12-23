@@ -200,7 +200,7 @@ func (p *Peer) Disconnect() error {
 // not proper yet
 func (p *Peer) fatalError(err error) {
 	p.conn.Close()
-	p.closeErr = err
+	p.closeErr = fmt.Errorf("peer already disconnected due to fatal error: %w", err)
 	p.clearResponseMap()
 	p.Status = Disconnected
 }
@@ -285,7 +285,7 @@ func (p *Peer) handle() {
 			}
 			err = p.handleReceivedUpdate(u)
 			if err != nil {
-				p.fatalError(err)
+				p.fatalError(fmt.Errorf("failed to handle received update: %w", err))
 				return
 			}
 		case request:
@@ -295,7 +295,7 @@ func (p *Peer) handle() {
 			}
 			err := p.handleReceivedRequest(r)
 			if err != nil {
-				p.fatalError(err)
+				p.fatalError(fmt.Errorf("failed to handle received request: %w", err))
 				return
 			}
 		case response:
@@ -305,7 +305,7 @@ func (p *Peer) handle() {
 			}
 			err = p.handleReceivedResponse(res)
 			if err != nil {
-				p.fatalError(err)
+				p.fatalError(fmt.Errorf("failed to handle received response: %w", err))
 				return
 			}
 		}

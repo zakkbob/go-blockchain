@@ -12,9 +12,11 @@ func (app *application) run(peers []string, difficulty int) error {
 	app.logger.Info("Starting server", "port", port)
 
 	if len(peers) > 0 {
-		err := app.node.Connect(peers)
-		if err != nil {
-			return err
+		for _, p := range peers {
+			err := app.node.Connect(p)
+			if err != nil {
+				app.logger.Info("Failed to connect to peer", "peer", p, "error", err.Error())
+			}
 		}
 
 		var blocks []blockchain.Block

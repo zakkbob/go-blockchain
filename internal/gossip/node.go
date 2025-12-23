@@ -2,10 +2,14 @@ package gossip
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"sync"
+	"time"
 )
 
 var (
@@ -15,14 +19,17 @@ var (
 const maxPeers = 10
 
 type Node struct {
-	addr            string
+	listener        net.Listener
+	addr            string // local address
 	logger          *slog.Logger
-	receivedUpdates map[[32]byte]struct{}
+	receivedUpdates map[[32]byte]struct{} // hashes of received updates
 	updateHandler   func(ReceivedUpdate) error
 	requestHandler  func(ReceivedRequest) (response any, err error)
-	listener        net.Listener
-	peers           []*Peer
-	mu              sync.RWMutex
+	peers           []*Peer // connected peers
+	peerAddrs       map[string]struct{}
+	peersMu         sync.RWMutex // mutex for peers array and map
+	knownPeers      []string     // addresses of potential future peers
+
 }
 
 func NewNode(addr string, logger *slog.Logger, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) *Node {
@@ -32,48 +39,52 @@ func NewNode(addr string, logger *slog.Logger, updateHandler func(ReceivedUpdate
 		receivedUpdates: map[[32]byte]struct{}{},
 		updateHandler:   updateHandler,
 		requestHandler:  requestHandler,
+		peerAddrs:       map[string]struct{}{},
 	}
-}
-
-func (n *Node) Connect(peers []string) error {
-	return n.connectTo(peers)
 }
 
 func (n *Node) Listen() error {
 	var err error
 
-	n.listener, err = net.Listen("tcp", n.addr)
+	l, err := net.Listen("tcp", n.addr)
 	if err != nil {
 		return err
 	}
 
+	n.listener = l
+
+	defer l.Close()
+
 	for {
-		c, err := n.listener.Accept()
+		c, err := l.Accept()
 		if err != nil {
 			n.logger.Error("Failed to accept incoming connection", "error", err)
-			continue
-		}
-
-		n.mu.RLock()
-		nPeers := len(n.peers)
-		n.mu.RUnlock()
-
-		if nPeers >= maxPeers {
-			n.logger.Info("Rejected incoming connection, already at max peers", "address", n.addr)
 			c.Close()
 			continue
 		}
 
-		n.logger.Info("Accepted incoming connection", "RemoteAddr", c.RemoteAddr().String())
+		go func() {
+			n.peersMu.RLock()
+			nPeers := len(n.peers)
+			n.peersMu.RUnlock()
 
-		p, err := PeerFromConn(c, n.handleUpdate, n.handleRequest)
-		if err != nil {
-			n.logger.Error("Failed to handle new successful connection", "error", err)
-		}
+			if nPeers >= maxPeers {
+				n.logger.Info("Rejected incoming connection, already at max peers", "address", n.addr)
+				c.Close()
+				return
+			}
 
-		n.mu.Lock()
-		n.peers = append(n.peers, p)
-		n.mu.Unlock()
+			n.logger.Info("Accepted incoming connection", "RemoteAddr", c.RemoteAddr().String())
+
+			p, err := PeerFromConn(c, n.handleUpdate, n.handleRequest)
+			if err != nil {
+				n.logger.Error("Failed to handle new successful connection", "error", err)
+				c.Close()
+				return
+			}
+
+			n.handleNewPeer(p)
+		}()
 	}
 }
 
@@ -81,7 +92,7 @@ func (n *Node) BroadcastUpdate(updateType string, data any) error {
 	var errs []error
 	var disconnectedPeers = false
 
-	n.mu.RLock()
+	n.peersMu.RLock()
 	for _, p := range n.peers {
 		if p.Status == Disconnected {
 			disconnectedPeers = true
@@ -98,21 +109,22 @@ func (n *Node) BroadcastUpdate(updateType string, data any) error {
 			}
 		}
 	}
-	n.mu.RUnlock()
+	n.peersMu.RUnlock()
 
 	if disconnectedPeers {
-		n.mu.Lock()
+		n.peersMu.Lock()
 		i := 0
 		for _, p := range n.peers {
 			if p.Status == Connected {
 				n.peers[i] = p
 				i++
 			} else {
+				delete(n.peerAddrs, p.RemoteAddr)
 				n.logger.Debug("Removed disconnected peer from list", "RemoteAddr", p.RemoteAddr)
 			}
 		}
 		n.peers = n.peers[:i]
-		n.mu.Unlock()
+		n.peersMu.Unlock()
 	}
 
 	if len(errs) > 0 {
@@ -123,8 +135,8 @@ func (n *Node) BroadcastUpdate(updateType string, data any) error {
 }
 
 func (n *Node) Request(ctx context.Context, requestType string, data any) (ReceivedResponse, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	n.peersMu.RLock()
+	defer n.peersMu.RUnlock()
 
 	if len(n.peers) == 0 {
 		return ReceivedResponse{}, ErrNoPeers
@@ -135,6 +147,8 @@ func (n *Node) Request(ctx context.Context, requestType string, data any) (Recei
 		return ReceivedResponse{}, err
 	}
 
+	n.logger.Debug("Received response to request", "requestType", requestType, "response", res)
+
 	return res, nil
 }
 
@@ -142,24 +156,77 @@ func (n *Node) ListenerAddr() net.Addr {
 	return n.listener.Addr()
 }
 
-func (n *Node) connectTo(addrs []string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	var errs []error
-
-	for _, addr := range addrs {
-		peer, err := Dial(addr, n.handleUpdate, n.handleRequest)
-		if err != nil {
-			n.logger.Error("Failed to connect to peer", "peer", addr, "error", err)
-			errs = append(errs, err)
-			continue
+func (n *Node) Connect(addr string) error {
+	if len(n.peers) >= maxPeers {
+		if !slices.Contains(n.knownPeers, addr) {
+			n.knownPeers = append(n.knownPeers, addr)
 		}
-		n.peers = append(n.peers, peer)
+		return nil
 	}
 
-	if len(errs) > 0 {
-		return errors.Join(errs...)
+	if addr == n.addr {
+		return nil
+	}
+
+	p, err := Dial(addr, n.handleUpdate, n.handleRequest)
+	if err != nil {
+		return err
+	}
+
+	return n.handleNewPeer(p)
+}
+
+func (n *Node) handleNewPeer(p *Peer) error {
+	n.peersMu.Lock()
+	n.logger.Debug("Peers", "peers", n.peerAddrs)
+	if _, ok := n.peerAddrs[p.RemoteAddr]; ok {
+		n.peersMu.Unlock()
+		n.logger.Debug("Prevented duplicate connection", "RemoteAddr", p.RemoteAddr)
+		return nil
+	}
+
+	n.peers = append(n.peers, p)
+	n.peerAddrs[p.RemoteAddr] = struct{}{}
+	n.peersMu.Unlock()
+
+	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	res, err := p.Request(ctx, peersRequest, nil)
+	if err != nil {
+		return fmt.Errorf("failed to request peer list from peer: %w", err)
+	}
+
+	var peers []string
+
+	err = json.Unmarshal(res.Data, &peers)
+	if err != nil {
+		return fmt.Errorf("failed to decode peer list: %w", err)
+	}
+
+	n.knownPeers = append(n.knownPeers, peers...)
+	n.attemptKnownPeers()
+
+	n.logger.Info("Connected to new peer", "RemoteAddr", p.RemoteAddr)
+
+	return nil
+}
+
+func (n *Node) attemptKnownPeers() error {
+	for i, p := range n.knownPeers {
+		n.peersMu.RLock()
+		if len(n.peers) >= maxPeers {
+			n.peersMu.RUnlock()
+			n.knownPeers = n.knownPeers[i:]
+			return nil
+		}
+		n.peersMu.RUnlock()
+
+		err := n.Connect(p)
+		if err != nil {
+			n.knownPeers = n.knownPeers[i:]
+			return err
+		}
 	}
 
 	return nil
@@ -184,5 +251,15 @@ func (n *Node) handleUpdate(u ReceivedUpdate) error {
 }
 
 func (n *Node) handleRequest(r ReceivedRequest) (any, error) {
+	n.logger.Info("Received request", "Type", r.Type)
+
+	switch r.Type {
+	case peersRequest:
+		var peers []string
+		for _, p := range n.peers {
+			peers = append(peers, p.RemoteAddr)
+		}
+		return peers, nil
+	}
 	return n.requestHandler(r)
 }

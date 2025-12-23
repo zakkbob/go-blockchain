@@ -89,7 +89,7 @@ func main() {
 
 	err = app.run(peers, difficulty)
 	if err != nil {
-		app.logger.Error(err.Error())
+		app.logger.Error("Encountered fatal error", "error", err.Error())
 		os.Exit(1)
 	}
 }
