@@ -87,5 +87,4 @@ func TestNewBlockHandler(t *testing.T) {
 	if ledger.Length() != 3 {
 		t.Fatal("Ermm, blocks should've been added!")
 	}
-
 }

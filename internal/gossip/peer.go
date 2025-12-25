@@ -3,6 +3,7 @@ package gossip
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -24,12 +25,25 @@ var (
 	ErrUnexpectedResponse = errors.New("received response does not match a request")
 )
 
+type ErrHandshakeFailed struct {
+	err error
+}
+
+func (ehf ErrHandshakeFailed) Error() string {
+	return fmt.Sprintf("failed to complete peer handshake: %v", ehf.err)
+}
+
+func (ehf ErrHandshakeFailed) Unwrap() error {
+	return ehf.err
+}
+
 type messageType int
 
 const (
 	update messageType = iota
 	request
 	response
+	handshake
 )
 
 type message struct {
@@ -87,16 +101,19 @@ func (r ReceivedResponse) String() string {
 	return fmt.Sprintf("{RequestID: %d, Data: '%s'}", r.RequestID, string(r.Data))
 }
 
-type status bool
+type status int
 
 const (
-	Connected    = true
-	Disconnected = false
+	Handshaking = iota
+	Connected
+	Disconnected
 )
 
 type Peer struct {
-	Status     status
-	RemoteAddr string
+	Status       status
+	RemotePubkey ed25519.PublicKey
+
+	handshakeChan chan struct{}
 
 	conn   net.Conn
 	lastID atomic.Int64
@@ -110,19 +127,19 @@ type Peer struct {
 	closeErr error // isnt handled properlu yet
 }
 
-func Dial(address string, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) (*Peer, error) {
+func Dial(ctx context.Context, address string, pubkey ed25519.PublicKey, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) (*Peer, error) {
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
 		return nil, err
 	}
 
-	return PeerFromConn(conn, updateHandler, requestHandler)
+	return PeerFromConn(ctx, pubkey, conn, updateHandler, requestHandler)
 }
 
-func PeerFromConn(conn net.Conn, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) (*Peer, error) {
+func PeerFromConn(ctx context.Context, pubkey ed25519.PublicKey, conn net.Conn, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) (*Peer, error) {
 	p := &Peer{
-		Status:         Connected,
-		RemoteAddr:     conn.RemoteAddr().String(),
+		Status:         Handshaking,
+		handshakeChan:  make(chan struct{}),
 		conn:           conn,
 		updateHandler:  updateHandler,
 		requestHandler: requestHandler,
@@ -130,6 +147,21 @@ func PeerFromConn(conn net.Conn, updateHandler func(ReceivedUpdate) error, reque
 	}
 
 	go p.handle()
+
+	p.send(message{
+		MessageType: handshake,
+		Message:     pubkey,
+	})
+
+	select {
+	case <-p.handshakeChan:
+		if p.closeErr != nil {
+			return nil, p.closeErr
+		}
+	case <-ctx.Done():
+		p.fatalError(ctx.Err())
+		return nil, ErrHandshakeFailed{err: ctx.Err()}
+	}
 
 	return p, nil
 }
@@ -277,7 +309,26 @@ func (p *Peer) handle() {
 			return
 		}
 
+		if p.Status == Handshaking && m.MessageType != handshake {
+			p.fatalError(ErrHandshakeFailed{err: fmt.Errorf("received message from peer before handshake completed")})
+			close(p.handshakeChan)
+			return
+		}
+
 		switch m.MessageType {
+		case handshake:
+			if p.Status != Handshaking {
+				p.fatalError(errors.New("peer sent handshake twice"))
+				return
+			}
+			if err := json.Unmarshal(m.Message, &p.RemotePubkey); err != nil {
+				p.fatalError(err)
+				close(p.handshakeChan)
+				return
+			}
+			close(p.handshakeChan)
+			p.Status = Connected
+			continue
 		case update:
 			if err := json.Unmarshal(m.Message, &u); err != nil {
 				p.fatalError(err)

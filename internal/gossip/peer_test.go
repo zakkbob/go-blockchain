@@ -3,7 +3,6 @@ package gossip_test
 import (
 	"context"
 	"encoding/json"
-	"net"
 	"slices"
 	"sync"
 	"testing"
@@ -107,17 +106,13 @@ func (s *requestRecorder) RecordRequest(r gossip.ReceivedRequest) (any, error) {
 }
 
 func TestPeerUpdate(t *testing.T) {
-	conn1, conn2 := net.Pipe()
-
 	recorder := updateRecorder{}
+	sender, receiver := gossip.CreatePeerPipe(t,
+		expectNoUpdate(t), expectNoRequest(t),
+		recorder.RecordUpdate, expectNoRequest(t),
+	)
 
-	sender, err := gossip.PeerFromConn(conn1, expectNoUpdate(t), expectNoRequest(t))
-	require.NoError(t, err)
-
-	receiver, err := gossip.PeerFromConn(conn2, recorder.RecordUpdate, expectNoRequest(t))
-	require.NoError(t, err)
-
-	err = sender.Update("type", "data")
+	err := sender.Update("type", "data")
 	require.NoError(t, err)
 
 	assert.Eventually(t, func() bool {
@@ -139,17 +134,14 @@ func TestPeerUpdate(t *testing.T) {
 }
 
 func TestPeerRequest(t *testing.T) {
-	conn1, conn2 := net.Pipe()
-
 	recorder := requestRecorder{
 		Response: "response",
 	}
 
-	sender, err := gossip.PeerFromConn(conn2, expectNoUpdate(t), expectNoRequest(t))
-	require.NoError(t, err)
-
-	receiver, err := gossip.PeerFromConn(conn1, expectNoUpdate(t), recorder.RecordRequest)
-	require.NoError(t, err)
+	sender, receiver := gossip.CreatePeerPipe(t,
+		expectNoUpdate(t), expectNoRequest(t),
+		expectNoUpdate(t), recorder.RecordRequest,
+	)
 
 	var wg sync.WaitGroup
 

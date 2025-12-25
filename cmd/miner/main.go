@@ -85,7 +85,7 @@ func main() {
 		txpool:  txpool.Pool{},
 	}
 
-	app.node = gossip.NewNode(fmt.Sprintf(":%d", port), logger, app.handleUpdate, app.handleRequest)
+	app.node = gossip.NewNode(fmt.Sprintf(":%d", port), address.PublicKey(), logger, app.handleUpdate, app.handleRequest)
 
 	err = app.run(peers, difficulty)
 	if err != nil {

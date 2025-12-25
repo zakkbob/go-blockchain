@@ -2,10 +2,13 @@ package gossip
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 )
 
 var (
@@ -16,6 +19,7 @@ const maxPeers = 10
 
 type Node struct {
 	addr            string
+	pubkey          ed25519.PublicKey
 	logger          *slog.Logger
 	receivedUpdates map[[32]byte]struct{}
 	updateHandler   func(ReceivedUpdate) error
@@ -25,9 +29,10 @@ type Node struct {
 	mu              sync.RWMutex
 }
 
-func NewNode(addr string, logger *slog.Logger, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) *Node {
+func NewNode(addr string, pubkey ed25519.PublicKey, logger *slog.Logger, updateHandler func(ReceivedUpdate) error, requestHandler func(ReceivedRequest) (any, error)) *Node {
 	return &Node{
 		addr:            addr,
+		pubkey:          pubkey,
 		logger:          logger,
 		receivedUpdates: map[[32]byte]struct{}{},
 		updateHandler:   updateHandler,
@@ -64,12 +69,16 @@ func (n *Node) Listen() error {
 			continue
 		}
 
-		n.logger.Info("Accepted incoming connection", "RemoteAddr", c.RemoteAddr().String())
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 
-		p, err := PeerFromConn(c, n.handleUpdate, n.handleRequest)
+		p, err := PeerFromConn(ctx, n.pubkey, c, n.handleUpdate, n.handleRequest)
+		cancel()
 		if err != nil {
-			n.logger.Error("Failed to handle new successful connection", "error", err)
+			n.logger.Error("Failed to handle new connection", "error", err)
+			continue
 		}
+
+		n.logger.Info("Accepted incoming connection", "RemoteAddr", c.RemoteAddr().String(), "Pubkey", fmt.Sprintf("%x", p.RemotePubkey))
 
 		n.mu.Lock()
 		n.peers = append(n.peers, p)
@@ -108,7 +117,7 @@ func (n *Node) BroadcastUpdate(updateType string, data any) error {
 				n.peers[i] = p
 				i++
 			} else {
-				n.logger.Debug("Removed disconnected peer from list", "RemoteAddr", p.RemoteAddr)
+				n.logger.Info("Disconnected from peer", "Pubkey", fmt.Sprintf("%x", p.RemotePubkey))
 			}
 		}
 		n.peers = n.peers[:i]
@@ -149,7 +158,9 @@ func (n *Node) connectTo(addrs []string) error {
 	var errs []error
 
 	for _, addr := range addrs {
-		peer, err := Dial(addr, n.handleUpdate, n.handleRequest)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+		peer, err := Dial(ctx, addr, n.pubkey, n.handleUpdate, n.handleRequest)
+		cancel()
 		if err != nil {
 			n.logger.Error("Failed to connect to peer", "peer", addr, "error", err)
 			errs = append(errs, err)

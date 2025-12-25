@@ -44,12 +44,16 @@ func AssertAddressBalance(t *testing.T, l *Ledger, a Address, expected uint64) {
 
 func MustCreateTestLedger(t *testing.T) (*Ledger, *Block) {
 	t.Helper()
-	ledger, err := NewLedger(0)
+	l, err := NewLedger(0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	return ledger, ledger.Head()
+	b := NewGenesisBlock(0)
+	b.Mine()
+	l.AddBlock(b)
+
+	return l, l.Head()
 }
 
 func MustGenerateTestAddress(t *testing.T) Address {
